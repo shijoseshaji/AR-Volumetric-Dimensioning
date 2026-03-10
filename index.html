@@ -3,32 +3,52 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-    <title>AI Static Scanner v7</title>
+    <title>AI Volumetric Pro v9</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/objectron"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
     <style>
         body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; }
         #canvas_output { width: 100vw; height: 100vh; object-fit: cover; }
-        .ui { position: fixed; bottom: 0; width: 100%; background: rgba(0,0,0,0.9); padding: 25px 0; border-radius: 20px 20px 0 0; display: flex; flex-direction: column; align-items: center; gap: 10px; z-index: 100; }
-        #dims { font-size: 24px; font-weight: bold; color: #00ff00; height: 30px; }
-        .btn-row { display: flex; gap: 10px; width: 90%; }
-        button { flex: 1; padding: 18px; border: none; border-radius: 12px; font-weight: bold; font-size: 16px; cursor: pointer; }
+        .top-bar { position: fixed; top: 10px; width: 100%; display: flex; justify-content: space-between; padding: 0 15px; box-sizing: border-box; z-index: 100; }
+        .ui { position: fixed; bottom: 0; width: 100%; background: rgba(0,0,0,0.95); padding: 20px 0; border-radius: 20px 20px 0 0; display: flex; flex-direction: column; align-items: center; gap: 10px; z-index: 100; }
+        #dims { font-size: 22px; font-weight: bold; color: #00ff00; }
+        #vol { font-size: 14px; color: #00e5ff; margin-bottom: 5px; }
+        .btn-row { display: flex; gap: 8px; width: 90%; }
+        button { flex: 1; padding: 15px; border: none; border-radius: 12px; font-weight: bold; cursor: pointer; }
         .btn-main { background: #00ff00; color: #000; }
-        .btn-sec { background: #333; color: #fff; }
-        #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: none; justify-content: center; align-items: center; z-index: 500; }
+        .btn-sec { background: #222; color: #fff; border: 1px solid #444; }
+        #history-panel { position: fixed; top: 100%; left: 0; width: 100%; height: 80%; background: #111; z-index: 200; transition: 0.4s; padding: 20px; box-sizing: border-box; overflow-y: auto; border-radius: 20px 20px 0 0; }
+        #history-panel.open { top: 20%; }
+        .history-item { background: #1a1a1a; padding: 15px; border-radius: 12px; margin-bottom: 12px; border-left: 4px solid #00ff00; position: relative; }
+        .download-link { color: #00ff00; font-size: 12px; text-decoration: underline; margin-top: 10px; display: inline-block; cursor: pointer; }
     </style>
 </head>
 <body>
-    <div id="loading-overlay">AI Computing...</div>
+    <div id="loader" style="position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(0,0,0,0.8); padding:20px; border-radius:10px; display:none; z-index:500;">AI Processing...</div>
     <video id="input_video" style="display:none;" playsinline></video>
     <canvas id="canvas_output"></canvas>
 
+    <div class="top-bar">
+        <button class="btn-sec" style="width:auto;" onclick="toggleHistory()">📜 History</button>
+        <button class="btn-sec" style="width:auto;" onclick="switchCamera()">🔄 Flip</button>
+    </div>
+
     <div class="ui">
-        <div id="dims">Point & Capture</div>
+        <div id="dims">Ready to Scan</div>
+        <div id="vol">Volume: --</div>
         <div class="btn-row">
-            <button class="btn-sec" onclick="location.reload()">🔄 Reset</button>
-            <button class="btn-main" id="capBtn" onclick="runAIOnDemand()">📸 Capture & Measure</button>
+            <button class="btn-sec" onclick="calibrate()">📏 Calib</button>
+            <button class="btn-main" id="actionBtn" onclick="handleAction()">📸 Capture & Measure</button>
         </div>
+    </div>
+
+    <div id="history-panel">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h2 style="margin:0;">History</h2>
+            <button onclick="clearHistory()" style="background:#ff4444; color:white; padding:8px 12px; border-radius:8px; border:none; font-size:12px;">Clear All</button>
+        </div>
+        <div id="history-list" style="margin-top:20px;"></div>
+        <button class="btn-sec" style="width:100%; margin-top:20px; background:#333;" onclick="toggleHistory()">Close</button>
     </div>
 
     <script type="module">
@@ -36,68 +56,72 @@
         const canvas = document.getElementById('canvas_output');
         const ctx = canvas.getContext('2d');
         const dimDiv = document.getElementById('dims');
-        const loader = document.getElementById('loading-overlay');
+        const volDiv = document.getElementById('vol');
+        const actionBtn = document.getElementById('actionBtn');
 
         let cameraObj = null;
+        let isCaptured = false;
+        let currentFacing = 'environment';
         let scaleFactor = 100;
+        let history = JSON.parse(localStorage.getItem('box_history_v9') || '[]');
 
-        // Initialize AI but DON'T start it yet
         const objectron = new Objectron({
             locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/objectron/${file}`
         });
 
-        objectron.setOptions({
-            modelName: 'Box',
-            maxNumObjects: 1,
-            staticImageMode: true // THIS IS THE KEY: Runs once on a static frame
-        });
+        objectron.setOptions({ modelName: 'Box', maxNumObjects: 1, staticImageMode: true });
 
         objectron.onResults((results) => {
-            loader.style.display = "none";
+            document.getElementById('loader').style.display = "none";
             if (results.detectedObjects.length > 0) {
                 const obj = results.detectedObjects[0];
-                // Draw the box only once
                 const l = (obj.scale[0] * scaleFactor).toFixed(1);
                 const w = (obj.scale[1] * scaleFactor).toFixed(1);
                 const h = (obj.scale[2] * scaleFactor).toFixed(1);
-                dimDiv.innerText = `${l} x ${w} x ${h} cm`;
-                
-                // Keep the last captured frame visible with the box on top
+                const volume = (l * w * h).toFixed(0);
+
+                const dimStr = `${l}x${w}x${h} cm`;
+                const volStr = `${volume} cm³`;
+
+                dimDiv.innerText = dimStr;
+                volDiv.innerText = `Volume: ${volStr}`;
+
+                // Draw a simple green border for visual confirmation on the saved image
                 ctx.strokeStyle = "#00ff00";
-                ctx.lineWidth = 5;
-                // Simple visual confirmation
-                ctx.strokeRect(canvas.width/4, canvas.height/4, canvas.width/2, canvas.height/2);
+                ctx.lineWidth = 10;
+                ctx.strokeRect(0, 0, canvas.width, canvas.height);
+                
+                saveToHistory(dimStr, volStr, canvas.toDataURL());
             } else {
                 dimDiv.innerText = "Box not found. Try again.";
             }
         });
 
-        async function startStreaming() {
+        async function startCamera(mode) {
+            if (cameraObj) await cameraObj.stop();
             cameraObj = new Camera(video, {
                 onFrame: async () => {
-                    // Only draw video to canvas, NO AI processing here
-                    canvas.width = video.videoWidth;
-                    canvas.height = video.videoHeight;
-                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    if (!isCaptured) {
+                        canvas.width = video.videoWidth;
+                        canvas.height = video.videoHeight;
+                        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    }
                 },
-                facingMode: 'environment',
-                width: 640, height: 480
+                facingMode: mode, width: 640, height: 480
             });
             cameraObj.start();
         }
 
-        window.runAIOnDemand = async () => {
-            loader.style.display = "flex";
-            dimDiv.innerText = "Calculating...";
-            
-            // Send exactly ONE frame to the AI
-            await objectron.send({image: video});
-            
-            // Stop the camera to save battery and freeze the image
-            if (cameraObj) await cameraObj.stop();
-        };
-
-        startStreaming();
-    </script>
-</body>
-</html>
+        window.handleAction = async () => {
+            if (!isCaptured) {
+                isCaptured = true;
+                document.getElementById('loader').style.display = "block";
+                actionBtn.innerText = "♻️ New Scan";
+                actionBtn.style.background = "#333";
+                actionBtn.style.color = "#fff";
+                await objectron.send({image: video});
+                if (cameraObj) await cameraObj.stop();
+            } else {
+                isCaptured = false;
+                actionBtn.innerText = "📸 Capture & Measure";
+                actionBtn.style.
