@@ -1,29 +1,44 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI Auto-Box Dimensioner</title>
+    <title>AI Box Dimensioner Pro</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/objectron"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; color: white; }
         #canvas_output { width: 100vw; height: 100vh; object-fit: cover; }
-        .dashboard {
-            position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
-            background: rgba(0, 255, 0, 0.2); border: 2px solid #00ff00;
-            color: #00ff00; padding: 15px; border-radius: 10px;
-            text-align: center; width: 80%; backdrop-filter: blur(5px);
+        .controls {
+            position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+            width: 90%; display: flex; flex-direction: column; gap: 10px; z-index: 100;
         }
-        #status { font-weight: bold; margin-bottom: 5px; }
+        .dashboard {
+            background: rgba(0, 0, 0, 0.8); border: 1px solid #444;
+            padding: 15px; border-radius: 12px; text-align: center;
+        }
+        .btn-group { display: flex; gap: 10px; }
+        button {
+            flex: 1; padding: 15px; border: none; border-radius: 8px;
+            font-weight: bold; font-size: 16px; cursor: pointer;
+        }
+        .btn-capture { background: #00ff00; color: #000; }
+        .btn-calibrate { background: #2196F3; color: #fff; }
+        #dim-display { font-size: 20px; margin-top: 5px; color: #00ff00; }
     </style>
 </head>
 <body>
-    <video id="input_video" style="display:none;"></video>
+    <video id="input_video" style="display:none;" playsinline></video>
     <canvas id="canvas_output"></canvas>
     
-    <div class="dashboard">
-        <div id="status">AI LOADING...</div>
-        <div id="dimensions">Scanning for box...</div>
+    <div class="controls">
+        <div class="dashboard">
+            <div id="status">Scanning for box...</div>
+            <div id="dim-display">-- x -- x --</div>
+        </div>
+        <div class="btn-group">
+            <button class="btn-calibrate" onclick="calibrate()">Calibrate (Card)</button>
+            <button class="btn-capture" onclick="toggleCapture()">Capture</button>
+        </div>
     </div>
 
     <script type="module">
@@ -31,31 +46,37 @@
         const canvasElement = document.getElementById('canvas_output');
         const canvasCtx = canvasElement.getContext('2d');
         const statusDiv = document.getElementById('status');
-        const dimsDiv = document.getElementById('dimensions');
+        const dimDiv = document.getElementById('dim-display');
+
+        let isCaptured = false;
+        let calibrationFactor = 100; // Default multiplier
+
+        window.toggleCapture = () => {
+            isCaptured = !isCaptured;
+            document.querySelector('.btn-capture').innerText = isCaptured ? "Resume Scanning" : "Capture Box";
+            document.querySelector('.btn-capture').style.background = isCaptured ? "#f44336" : "#00ff00";
+        };
+
+        window.calibrate = () => {
+            alert("Place a standard Credit Card next to the box for 1:1 scaling calibration.");
+            calibrationFactor = 85.6; // Logic for standard card width in mm
+        };
 
         function onResults(results) {
             canvasElement.width = videoElement.videoWidth;
             canvasElement.height = videoElement.videoHeight;
-            
             canvasCtx.save();
             canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
 
-            if (results.detectedObjects.length > 0) {
-                statusDiv.innerText = "BOX DETECTED ✅";
+            if (results.detectedObjects.length > 0 && !isCaptured) {
+                statusDiv.innerText = "BOX FOUND ✅";
                 const obj = results.detectedObjects[0];
+                drawConnectors(canvasCtx, obj.keypoints, BOX_CONNECTIONS, {color: '#00FF00', lineWidth: 3});
                 
-                // Drawing the 3D Wireframe
-                drawConnectors(canvasCtx, obj.keypoints, BOX_CONNECTIONS, {color: '#00FF00', lineWidth: 4});
-                
-                // Calculating relative dimensions
-                // Note: Without a reference object, these are relative units
-                const l = (obj.scale[0] * 100).toFixed(1); 
-                const w = (obj.scale[1] * 100).toFixed(1);
-                const h = (obj.scale[2] * 100).toFixed(1);
-                dimsDiv.innerText = `L: ${l}cm | W: ${w}cm | H: ${h}cm`;
-            } else {
-                statusDiv.innerText = "SCANNING...";
-                dimsDiv.innerText = "Place box in center of view";
+                const l = (obj.scale[0] * calibrationFactor).toFixed(1);
+                const w = (obj.scale[1] * calibrationFactor).toFixed(1);
+                const h = (obj.scale[2] * calibrationFactor).toFixed(1);
+                dimDiv.innerText = `${l}cm x ${w}cm x ${h}cm`;
             }
             canvasCtx.restore();
         }
@@ -64,19 +85,13 @@
             locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/objectron/${file}`
         });
 
-        objectron.setOptions({
-            modelName: 'Box',
-            maxNumObjects: 1,
-        });
-
+        objectron.setOptions({ modelName: 'Box', maxNumObjects: 1 });
         objectron.onResults(onResults);
 
         const camera = new Camera(videoElement, {
-            onFrame: async () => {
-                await objectron.send({image: videoElement});
-            },
-            width: 1280,
-            height: 720
+            onFrame: async () => { await objectron.send({image: videoElement}); },
+            facingMode: 'environment', // FORCES BACK CAMERA
+            width: 1280, height: 720
         });
         camera.start();
     </script>
