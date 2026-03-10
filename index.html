@@ -3,25 +3,125 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-    <title>AI Volumetric Pro</title>
+    <title>AI Scanner v6</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/objectron"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
     <style>
-        body { margin: 0; background: #000; color: #fff; font-family: -apple-system, sans-serif; overflow: hidden; }
+        body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; }
         #canvas_output { width: 100vw; height: 100vh; object-fit: cover; }
-        
-        .top-bar { position: fixed; top: 10px; width: 100%; display: flex; justify-content: space-between; padding: 0 15px; box-sizing: border-box; z-index: 100; }
+        #error-log { position: fixed; top: 0; width: 100%; background: rgba(255,0,0,0.8); font-size: 10px; z-index: 1000; }
         .ui-bottom { position: fixed; bottom: 0; width: 100%; background: rgba(0,0,0,0.9); padding: 20px 0; border-radius: 20px 20px 0 0; display: flex; flex-direction: column; align-items: center; gap: 10px; z-index: 100; }
-        
-        .data-panel { width: 90%; text-align: center; }
-        #dims { font-size: 24px; font-weight: bold; color: #00ff00; }
-        #volume { font-size: 14px; color: #00e5ff; opacity: 0.8; }
-        
+        #dims { font-size: 22px; font-weight: bold; color: #00ff00; }
         .btn-row { display: flex; gap: 8px; width: 90%; }
         button { flex: 1; padding: 15px; border: none; border-radius: 12px; font-weight: bold; cursor: pointer; }
         .btn-main { background: #00ff00; color: #000; }
         .btn-sec { background: #222; color: #fff; border: 1px solid #444; }
+        #history-panel { position: fixed; top: 100%; left: 0; width: 100%; height: 70%; background: #111; z-index: 200; transition: 0.4s; padding: 20px; box-sizing: border-box; overflow-y: auto; border-radius: 20px 20px 0 0;}
+        #history-panel.open { top: 30%; }
+    </style>
+</head>
+<body>
+    <div id="error-log"></div>
+    <video id="input_video" style="display:none;" playsinline></video>
+    <canvas id="canvas_output"></canvas>
+
+    <div style="position:fixed; top:15px; width:100%; display:flex; justify-content:space-between; padding:0 15px; box-sizing:border-box; z-index:100;">
+        <button class="btn-sec" style="width:auto;" onclick="toggleHistory()">📜 History</button>
+        <button class="btn-sec" style="width:auto;" onclick="switchCamera()">🔄 Flip</button>
+    </div>
+
+    <div class="ui-bottom">
+        <div id="dims">Initializing AI...</div>
+        <div class="btn-row">
+            <button class="btn-sec" onclick="calibrate()">📏 Calib</button>
+            <button class="btn-main" id="capBtn" onclick="handleCapture()">📸 Capture</button>
+        </div>
+    </div>
+
+    <div id="history-panel">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h2>History</h2>
+            <button onclick="clearHistory()" style="background:#ff4444; color:white; padding:5px 10px; border-radius:5px;">Clear</button>
+        </div>
+        <div id="history-list"></div>
+        <button class="btn-sec" style="width:100%; margin-top:20px;" onclick="toggleHistory()">Close</button>
+    </div>
+
+    <script>
+        // Error Logger
+        window.onerror = function(msg, url, line) {
+            document.getElementById('error-log').innerText = "Error: " + msg + " line: " + line;
+        };
+
+        const video = document.getElementById('input_video');
+        const canvas = document.getElementById('canvas_output');
+        const ctx = canvas.getContext('2d');
+        const dimDiv = document.getElementById('dims');
         
-        /* History Slide-out */
-        #history-panel { position: fixed; top: 100%; left: 0; width: 100%; height: 75%; background: #111; z-index: 200; transition: 0.4s ease-in-out; border-radius:
+        let isLocked = false;
+        let currentFacing = 'environment';
+        let scaleFactor = 100;
+        let cameraObj = null;
+        let history = JSON.parse(localStorage.getItem('box_history') || '[]');
+
+        const objectron = new Objectron({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/objectron/${file}`
+        });
+
+        objectron.setOptions({ modelName: 'Box', maxNumObjects: 1, minDetectionConfidence: 0.4, minTrackingConfidence: 0.5 });
+
+        objectron.onResults((results) => {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+            if (results.detectedObjects.length > 0 && !isLocked) {
+                const obj = results.detectedObjects[0];
+                drawConnectors(ctx, obj.keypoints, BOX_CONNECTIONS, {color: '#00FF00', lineWidth: 3});
+                const l = (obj.scale[0] * scaleFactor).toFixed(1);
+                const w = (obj.scale[1] * scaleFactor).toFixed(1);
+                const h = (obj.scale[2] * scaleFactor).toFixed(1);
+                dimDiv.innerText = `${l}x${w}x${h} cm`;
+            }
+        });
+
+        async function startCamera(mode) {
+            if (cameraObj) await cameraObj.stop();
+            cameraObj = new Camera(video, {
+                onFrame: async () => { await objectron.send({image: video}); },
+                facingMode: mode, width: 640, height: 480
+            });
+            cameraObj.start();
+        }
+
+        window.switchCamera = () => {
+            currentFacing = (currentFacing === 'environment') ? 'user' : 'environment';
+            startCamera(currentFacing);
+        };
+
+        window.toggleHistory = () => {
+            document.getElementById('history-panel').classList.toggle('open');
+            const list = document.getElementById('history-list');
+            list.innerHTML = history.length ? history.map(h => `<div style="padding:10px; border-bottom:1px solid #333;">${h}</div>`).join('') : "No data";
+        };
+
+        window.clearHistory = () => { history = []; localStorage.removeItem('box_history'); toggleHistory(); };
+
+        window.calibrate = () => { let v = prompt("Scale:", scaleFactor); if(v) scaleFactor = parseFloat(v); };
+
+        window.handleCapture = () => {
+            if(!isLocked) {
+                isLocked = true;
+                history.unshift(dimDiv.innerText + " (" + new Date().toLocaleTimeString() + ")");
+                localStorage.setItem('box_history', JSON.stringify(history.slice(0,10)));
+                document.getElementById('capBtn').innerText = "Reset";
+            } else {
+                isLocked = false;
+                document.getElementById('capBtn').innerText = "Capture";
+            }
+        };
+
+        startCamera(currentFacing);
+    </script>
+</body>
+</html>
