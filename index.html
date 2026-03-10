@@ -3,52 +3,31 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-    <title>AI Volumetric Pro v9</title>
+    <title>AI Scanner v11 - Android Fix</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/objectron"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
     <style>
         body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; }
-        #canvas_output { width: 100vw; height: 100vh; object-fit: cover; }
-        .top-bar { position: fixed; top: 10px; width: 100%; display: flex; justify-content: space-between; padding: 0 15px; box-sizing: border-box; z-index: 100; }
-        .ui { position: fixed; bottom: 0; width: 100%; background: rgba(0,0,0,0.95); padding: 20px 0; border-radius: 20px 20px 0 0; display: flex; flex-direction: column; align-items: center; gap: 10px; z-index: 100; }
+        #canvas_output { width: 100vw; height: 100vh; object-fit: cover; background: #111; }
+        .ui { position: fixed; bottom: 0; width: 100%; background: rgba(0,0,0,0.9); padding: 25px 0; border-radius: 20px 20px 0 0; display: flex; flex-direction: column; align-items: center; gap: 10px; z-index: 100; }
         #dims { font-size: 22px; font-weight: bold; color: #00ff00; }
-        #vol { font-size: 14px; color: #00e5ff; margin-bottom: 5px; }
-        .btn-row { display: flex; gap: 8px; width: 90%; }
-        button { flex: 1; padding: 15px; border: none; border-radius: 12px; font-weight: bold; cursor: pointer; }
-        .btn-main { background: #00ff00; color: #000; }
-        .btn-sec { background: #222; color: #fff; border: 1px solid #444; }
-        #history-panel { position: fixed; top: 100%; left: 0; width: 100%; height: 80%; background: #111; z-index: 200; transition: 0.4s; padding: 20px; box-sizing: border-box; overflow-y: auto; border-radius: 20px 20px 0 0; }
-        #history-panel.open { top: 20%; }
-        .history-item { background: #1a1a1a; padding: 15px; border-radius: 12px; margin-bottom: 12px; border-left: 4px solid #00ff00; position: relative; }
-        .download-link { color: #00ff00; font-size: 12px; text-decoration: underline; margin-top: 10px; display: inline-block; cursor: pointer; }
+        button { padding: 15px 25px; border: none; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 16px; }
+        .btn-main { background: #00ff00; color: #000; width: 80%; }
+        #loading-overlay { position: fixed; top: 0; width: 100%; height: 100%; background: #000; z-index: 1000; display: flex; justify-content: center; align-items: center; }
     </style>
 </head>
 <body>
-    <div id="loader" style="position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(0,0,0,0.8); padding:20px; border-radius:10px; display:none; z-index:500;">AI Processing...</div>
-    <video id="input_video" style="display:none;" playsinline></video>
+    <div id="loading-overlay">
+        <button id="initBtn" class="btn-main" onclick="initializeAndroidCamera()">Click to Start Camera</button>
+        <div id="status-msg" style="display:none; color:#00ff00;">Waking up Camera...</div>
+    </div>
+
+    <video id="input_video" style="display:none;" playsinline muted></video>
     <canvas id="canvas_output"></canvas>
 
-    <div class="top-bar">
-        <button class="btn-sec" style="width:auto;" onclick="toggleHistory()">📜 History</button>
-        <button class="btn-sec" style="width:auto;" onclick="switchCamera()">🔄 Flip</button>
-    </div>
-
     <div class="ui">
-        <div id="dims">Ready to Scan</div>
-        <div id="vol">Volume: --</div>
-        <div class="btn-row">
-            <button class="btn-sec" onclick="calibrate()">📏 Calib</button>
-            <button class="btn-main" id="actionBtn" onclick="handleAction()">📸 Capture & Measure</button>
-        </div>
-    </div>
-
-    <div id="history-panel">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-            <h2 style="margin:0;">History</h2>
-            <button onclick="clearHistory()" style="background:#ff4444; color:white; padding:8px 12px; border-radius:8px; border:none; font-size:12px;">Clear All</button>
-        </div>
-        <div id="history-list" style="margin-top:20px;"></div>
-        <button class="btn-sec" style="width:100%; margin-top:20px; background:#333;" onclick="toggleHistory()">Close</button>
+        <div id="dims">Scanning Ready</div>
+        <button class="btn-main" id="actionBtn" onclick="handleAction()">📸 Capture & Measure</button>
     </div>
 
     <script type="module">
@@ -56,72 +35,80 @@
         const canvas = document.getElementById('canvas_output');
         const ctx = canvas.getContext('2d');
         const dimDiv = document.getElementById('dims');
-        const volDiv = document.getElementById('vol');
-        const actionBtn = document.getElementById('actionBtn');
+        const overlay = document.getElementById('loading-overlay');
+        const statusMsg = document.getElementById('status-msg');
+        const initBtn = document.getElementById('initBtn');
 
-        let cameraObj = null;
         let isCaptured = false;
-        let currentFacing = 'environment';
-        let scaleFactor = 100;
-        let history = JSON.parse(localStorage.getItem('box_history_v9') || '[]');
+        let cameraObj = null;
 
         const objectron = new Objectron({
             locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/objectron/${file}`
         });
-
         objectron.setOptions({ modelName: 'Box', maxNumObjects: 1, staticImageMode: true });
 
         objectron.onResults((results) => {
-            document.getElementById('loader').style.display = "none";
             if (results.detectedObjects.length > 0) {
                 const obj = results.detectedObjects[0];
-                const l = (obj.scale[0] * scaleFactor).toFixed(1);
-                const w = (obj.scale[1] * scaleFactor).toFixed(1);
-                const h = (obj.scale[2] * scaleFactor).toFixed(1);
-                const volume = (l * w * h).toFixed(0);
-
-                const dimStr = `${l}x${w}x${h} cm`;
-                const volStr = `${volume} cm³`;
-
-                dimDiv.innerText = dimStr;
-                volDiv.innerText = `Volume: ${volStr}`;
-
-                // Draw a simple green border for visual confirmation on the saved image
-                ctx.strokeStyle = "#00ff00";
-                ctx.lineWidth = 10;
-                ctx.strokeRect(0, 0, canvas.width, canvas.height);
-                
-                saveToHistory(dimStr, volStr, canvas.toDataURL());
+                const l = (obj.scale[0] * 100).toFixed(1);
+                const w = (obj.scale[1] * 100).toFixed(1);
+                const h = (obj.scale[2] * 100).toFixed(1);
+                dimDiv.innerText = `${l} x ${w} x ${h} cm`;
             } else {
-                dimDiv.innerText = "Box not found. Try again.";
+                dimDiv.innerText = "No box found. Try different angle.";
             }
         });
 
-        async function startCamera(mode) {
-            if (cameraObj) await cameraObj.stop();
-            cameraObj = new Camera(video, {
-                onFrame: async () => {
-                    if (!isCaptured) {
-                        canvas.width = video.videoWidth;
-                        canvas.height = video.videoHeight;
-                        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                    }
-                },
-                facingMode: mode, width: 640, height: 480
-            });
-            cameraObj.start();
-        }
+        // FIXED: Android Startup Sequence
+        window.initializeAndroidCamera = async () => {
+            initBtn.style.display = "none";
+            statusMsg.style.display = "block";
+
+            try {
+                // 1. Force clear any existing streams
+                if (window.stream) {
+                    window.stream.getTracks().forEach(track => track.stop());
+                }
+
+                // 2. Delay for Android hardware warm-up
+                await new Promise(r => setTimeout(r, 1000));
+
+                cameraObj = new Camera(video, {
+                    onFrame: async () => {
+                        if (!isCaptured) {
+                            canvas.width = video.videoWidth;
+                            canvas.height = video.videoHeight;
+                            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                        }
+                    },
+                    facingMode: 'environment',
+                    width: 640, height: 480
+                });
+
+                await cameraObj.start();
+                
+                // 3. Final handshake delay
+                setTimeout(() => {
+                    overlay.style.display = "none";
+                }, 800);
+
+            } catch (err) {
+                alert("Android Camera Blocked: Please check Chrome settings.");
+                console.error(err);
+            }
+        };
 
         window.handleAction = async () => {
             if (!isCaptured) {
                 isCaptured = true;
-                document.getElementById('loader').style.display = "block";
-                actionBtn.innerText = "♻️ New Scan";
-                actionBtn.style.background = "#333";
-                actionBtn.style.color = "#fff";
+                dimDiv.innerText = "AI Processing...";
                 await objectron.send({image: video});
                 if (cameraObj) await cameraObj.stop();
+                document.getElementById('actionBtn').innerText = "♻️ New Scan";
             } else {
-                isCaptured = false;
-                actionBtn.innerText = "📸 Capture & Measure";
-                actionBtn.style.
+                location.reload(); 
+            }
+        };
+    </script>
+</body>
+</html>
