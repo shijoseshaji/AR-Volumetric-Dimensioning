@@ -3,125 +3,101 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-    <title>AI Scanner v6</title>
+    <title>AI Static Scanner v7</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/objectron"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
     <style>
         body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; }
         #canvas_output { width: 100vw; height: 100vh; object-fit: cover; }
-        #error-log { position: fixed; top: 0; width: 100%; background: rgba(255,0,0,0.8); font-size: 10px; z-index: 1000; }
-        .ui-bottom { position: fixed; bottom: 0; width: 100%; background: rgba(0,0,0,0.9); padding: 20px 0; border-radius: 20px 20px 0 0; display: flex; flex-direction: column; align-items: center; gap: 10px; z-index: 100; }
-        #dims { font-size: 22px; font-weight: bold; color: #00ff00; }
-        .btn-row { display: flex; gap: 8px; width: 90%; }
-        button { flex: 1; padding: 15px; border: none; border-radius: 12px; font-weight: bold; cursor: pointer; }
+        .ui { position: fixed; bottom: 0; width: 100%; background: rgba(0,0,0,0.9); padding: 25px 0; border-radius: 20px 20px 0 0; display: flex; flex-direction: column; align-items: center; gap: 10px; z-index: 100; }
+        #dims { font-size: 24px; font-weight: bold; color: #00ff00; height: 30px; }
+        .btn-row { display: flex; gap: 10px; width: 90%; }
+        button { flex: 1; padding: 18px; border: none; border-radius: 12px; font-weight: bold; font-size: 16px; cursor: pointer; }
         .btn-main { background: #00ff00; color: #000; }
-        .btn-sec { background: #222; color: #fff; border: 1px solid #444; }
-        #history-panel { position: fixed; top: 100%; left: 0; width: 100%; height: 70%; background: #111; z-index: 200; transition: 0.4s; padding: 20px; box-sizing: border-box; overflow-y: auto; border-radius: 20px 20px 0 0;}
-        #history-panel.open { top: 30%; }
+        .btn-sec { background: #333; color: #fff; }
+        #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: none; justify-content: center; align-items: center; z-index: 500; }
     </style>
 </head>
 <body>
-    <div id="error-log"></div>
+    <div id="loading-overlay">AI Computing...</div>
     <video id="input_video" style="display:none;" playsinline></video>
     <canvas id="canvas_output"></canvas>
 
-    <div style="position:fixed; top:15px; width:100%; display:flex; justify-content:space-between; padding:0 15px; box-sizing:border-box; z-index:100;">
-        <button class="btn-sec" style="width:auto;" onclick="toggleHistory()">📜 History</button>
-        <button class="btn-sec" style="width:auto;" onclick="switchCamera()">🔄 Flip</button>
-    </div>
-
-    <div class="ui-bottom">
-        <div id="dims">Initializing AI...</div>
+    <div class="ui">
+        <div id="dims">Point & Capture</div>
         <div class="btn-row">
-            <button class="btn-sec" onclick="calibrate()">📏 Calib</button>
-            <button class="btn-main" id="capBtn" onclick="handleCapture()">📸 Capture</button>
+            <button class="btn-sec" onclick="location.reload()">🔄 Reset</button>
+            <button class="btn-main" id="capBtn" onclick="runAIOnDemand()">📸 Capture & Measure</button>
         </div>
     </div>
 
-    <div id="history-panel">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-            <h2>History</h2>
-            <button onclick="clearHistory()" style="background:#ff4444; color:white; padding:5px 10px; border-radius:5px;">Clear</button>
-        </div>
-        <div id="history-list"></div>
-        <button class="btn-sec" style="width:100%; margin-top:20px;" onclick="toggleHistory()">Close</button>
-    </div>
-
-    <script>
-        // Error Logger
-        window.onerror = function(msg, url, line) {
-            document.getElementById('error-log').innerText = "Error: " + msg + " line: " + line;
-        };
-
+    <script type="module">
         const video = document.getElementById('input_video');
         const canvas = document.getElementById('canvas_output');
         const ctx = canvas.getContext('2d');
         const dimDiv = document.getElementById('dims');
-        
-        let isLocked = false;
-        let currentFacing = 'environment';
-        let scaleFactor = 100;
-        let cameraObj = null;
-        let history = JSON.parse(localStorage.getItem('box_history') || '[]');
+        const loader = document.getElementById('loading-overlay');
 
+        let cameraObj = null;
+        let scaleFactor = 100;
+
+        // Initialize AI but DON'T start it yet
         const objectron = new Objectron({
             locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/objectron/${file}`
         });
 
-        objectron.setOptions({ modelName: 'Box', maxNumObjects: 1, minDetectionConfidence: 0.4, minTrackingConfidence: 0.5 });
+        objectron.setOptions({
+            modelName: 'Box',
+            maxNumObjects: 1,
+            staticImageMode: true // THIS IS THE KEY: Runs once on a static frame
+        });
 
         objectron.onResults((results) => {
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
-            if (results.detectedObjects.length > 0 && !isLocked) {
+            loader.style.display = "none";
+            if (results.detectedObjects.length > 0) {
                 const obj = results.detectedObjects[0];
-                drawConnectors(ctx, obj.keypoints, BOX_CONNECTIONS, {color: '#00FF00', lineWidth: 3});
+                // Draw the box only once
                 const l = (obj.scale[0] * scaleFactor).toFixed(1);
                 const w = (obj.scale[1] * scaleFactor).toFixed(1);
                 const h = (obj.scale[2] * scaleFactor).toFixed(1);
-                dimDiv.innerText = `${l}x${w}x${h} cm`;
+                dimDiv.innerText = `${l} x ${w} x ${h} cm`;
+                
+                // Keep the last captured frame visible with the box on top
+                ctx.strokeStyle = "#00ff00";
+                ctx.lineWidth = 5;
+                // Simple visual confirmation
+                ctx.strokeRect(canvas.width/4, canvas.height/4, canvas.width/2, canvas.height/2);
+            } else {
+                dimDiv.innerText = "Box not found. Try again.";
             }
         });
 
-        async function startCamera(mode) {
-            if (cameraObj) await cameraObj.stop();
+        async function startStreaming() {
             cameraObj = new Camera(video, {
-                onFrame: async () => { await objectron.send({image: video}); },
-                facingMode: mode, width: 640, height: 480
+                onFrame: async () => {
+                    // Only draw video to canvas, NO AI processing here
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                },
+                facingMode: 'environment',
+                width: 640, height: 480
             });
             cameraObj.start();
         }
 
-        window.switchCamera = () => {
-            currentFacing = (currentFacing === 'environment') ? 'user' : 'environment';
-            startCamera(currentFacing);
+        window.runAIOnDemand = async () => {
+            loader.style.display = "flex";
+            dimDiv.innerText = "Calculating...";
+            
+            // Send exactly ONE frame to the AI
+            await objectron.send({image: video});
+            
+            // Stop the camera to save battery and freeze the image
+            if (cameraObj) await cameraObj.stop();
         };
 
-        window.toggleHistory = () => {
-            document.getElementById('history-panel').classList.toggle('open');
-            const list = document.getElementById('history-list');
-            list.innerHTML = history.length ? history.map(h => `<div style="padding:10px; border-bottom:1px solid #333;">${h}</div>`).join('') : "No data";
-        };
-
-        window.clearHistory = () => { history = []; localStorage.removeItem('box_history'); toggleHistory(); };
-
-        window.calibrate = () => { let v = prompt("Scale:", scaleFactor); if(v) scaleFactor = parseFloat(v); };
-
-        window.handleCapture = () => {
-            if(!isLocked) {
-                isLocked = true;
-                history.unshift(dimDiv.innerText + " (" + new Date().toLocaleTimeString() + ")");
-                localStorage.setItem('box_history', JSON.stringify(history.slice(0,10)));
-                document.getElementById('capBtn').innerText = "Reset";
-            } else {
-                isLocked = false;
-                document.getElementById('capBtn').innerText = "Capture";
-            }
-        };
-
-        startCamera(currentFacing);
+        startStreaming();
     </script>
 </body>
 </html>
