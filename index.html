@@ -1,69 +1,84 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI Box Measurer Prototype</title>
-    <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
-    <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+    <title>AI Auto-Box Dimensioner</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/objectron"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
     <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+        #canvas_output { width: 100vw; height: 100vh; object-fit: cover; }
         .dashboard {
-            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-            width: 80%; background: rgba(0,0,0,0.8); color: white;
-            padding: 15px; border-radius: 10px; font-family: sans-serif; z-index: 1000;
+            position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+            background: rgba(0, 255, 0, 0.2); border: 2px solid #00ff00;
+            color: #00ff00; padding: 15px; border-radius: 10px;
+            text-align: center; width: 80%; backdrop-filter: blur(5px);
         }
-        .btn { background: #2196F3; border: none; color: white; padding: 10px; width: 100%; border-radius: 5px; margin-top: 10px;}
+        #status { font-weight: bold; margin-bottom: 5px; }
     </style>
 </head>
-<body style="margin: 0; overflow: hidden;">
-
+<body>
+    <video id="input_video" style="display:none;"></video>
+    <canvas id="canvas_output"></canvas>
+    
     <div class="dashboard">
-        <div id="stats">Dimensions: 0.00m x 0.00m</div>
-        <button class="btn" onclick="addMarker()">Set Corner</button>
-        <button class="btn" style="background: #f44336;" onclick="reset()">Reset</button>
+        <div id="status">AI LOADING...</div>
+        <div id="dimensions">Scanning for box...</div>
     </div>
 
-    <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;">
-        <a-entity cursor="fuse: false; rayOrigin: mouse;"></a-entity>
-        <a-camera gps-camera rotation-reader>
-            <a-ring color="red" radius-inner="0.02" radius-outer="0.03" position="0 0 -1"></a-ring>
-        </a-camera>
-        
-        <a-entity id="marker-container"></a-entity>
-    </a-scene>
+    <script type="module">
+        const videoElement = document.getElementById('input_video');
+        const canvasElement = document.getElementById('canvas_output');
+        const canvasCtx = canvasElement.getContext('2d');
+        const statusDiv = document.getElementById('status');
+        const dimsDiv = document.getElementById('dimensions');
 
-    <script>
-        let markers = [];
-        
-        function addMarker() {
-            const scene = document.querySelector('#marker-container');
-            const camera = document.querySelector('a-camera');
+        function onResults(results) {
+            canvasElement.width = videoElement.videoWidth;
+            canvasElement.height = videoElement.videoHeight;
             
-            // Get current camera position as a proxy for the object point
-            const pos = camera.object3D.position;
-            
-            const newMarker = document.createElement('a-sphere');
-            newMarker.setAttribute('position', `${pos.x} ${pos.y} ${pos.z - 2}`); // Placing 2m in front
-            newMarker.setAttribute('radius', '0.05');
-            newMarker.setAttribute('color', 'yellow');
-            scene.appendChild(newMarker);
-            
-            markers.push({x: pos.x, y: pos.y, z: pos.z - 2});
-            calculateDistances();
-        }
+            canvasCtx.save();
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
 
-        function calculateDistances() {
-            if (markers.length >= 2) {
-                const p1 = markers[markers.length - 2];
-                const p2 = markers[markers.length - 1];
-                const dist = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2) + Math.pow(p2.z - p1.z, 2));
-                document.getElementById('stats').innerText = `Last Segment: ${dist.toFixed(2)} meters`;
+            if (results.detectedObjects.length > 0) {
+                statusDiv.innerText = "BOX DETECTED ✅";
+                const obj = results.detectedObjects[0];
+                
+                // Drawing the 3D Wireframe
+                drawConnectors(canvasCtx, obj.keypoints, BOX_CONNECTIONS, {color: '#00FF00', lineWidth: 4});
+                
+                // Calculating relative dimensions
+                // Note: Without a reference object, these are relative units
+                const l = (obj.scale[0] * 100).toFixed(1); 
+                const w = (obj.scale[1] * 100).toFixed(1);
+                const h = (obj.scale[2] * 100).toFixed(1);
+                dimsDiv.innerText = `L: ${l}cm | W: ${w}cm | H: ${h}cm`;
+            } else {
+                statusDiv.innerText = "SCANNING...";
+                dimsDiv.innerText = "Place box in center of view";
             }
+            canvasCtx.restore();
         }
 
-        function reset() {
-            markers = [];
-            document.querySelector('#marker-container').innerHTML = '';
-            document.getElementById('stats').innerText = "Dimensions: 0.00m";
-        }
+        const objectron = new Objectron({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/objectron/${file}`
+        });
+
+        objectron.setOptions({
+            modelName: 'Box',
+            maxNumObjects: 1,
+        });
+
+        objectron.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await objectron.send({image: videoElement});
+            },
+            width: 1280,
+            height: 720
+        });
+        camera.start();
     </script>
 </body>
 </html>
