@@ -3,62 +3,34 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-    <title>AI Volumetric Ultimate v12</title>
+    <title>AI Volumetric v14 - Manual Fallback</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/objectron"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
     <style>
         body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; }
-        #canvas_output { width: 100vw; height: 100vh; object-fit: cover; }
-        
-        /* UI Elements */
-        .top-bar { position: fixed; top: 10px; width: 100%; display: flex; justify-content: space-between; padding: 0 15px; box-sizing: border-box; z-index: 100; }
-        .ui-bottom { position: fixed; bottom: 0; width: 100%; background: rgba(0,0,0,0.9); padding: 20px 0; border-radius: 20px 20px 0 0; display: flex; flex-direction: column; align-items: center; gap: 8px; z-index: 100; }
-        #dims { font-size: 22px; font-weight: bold; color: #00ff00; }
-        #vol { font-size: 14px; color: #00e5ff; }
-
-        /* Buttons */
+        #canvas_output { width: 100vw; height: 100vh; object-fit: cover; cursor: crosshair; }
+        .ui-bottom { position: fixed; bottom: 0; width: 100%; background: rgba(0,0,0,0.95); padding: 20px 0; border-radius: 20px 20px 0 0; display: flex; flex-direction: column; align-items: center; gap: 8px; z-index: 100; }
+        #dims { font-size: 22px; font-weight: bold; color: #00ff00; text-align: center; }
         .btn-row { display: flex; gap: 8px; width: 90%; }
-        button { flex: 1; padding: 15px; border: none; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 14px; }
+        button { flex: 1; padding: 15px; border: none; border-radius: 12px; font-weight: bold; cursor: pointer; }
         .btn-main { background: #00ff00; color: #000; }
         .btn-sec { background: #222; color: #fff; border: 1px solid #444; }
-
-        /* History & Loading */
-        #history-panel { position: fixed; top: 100%; left: 0; width: 100%; height: 75%; background: #111; z-index: 200; transition: 0.4s; padding: 20px; box-sizing: border-box; overflow-y: auto; border-radius: 20px 20px 0 0; }
-        #history-panel.open { top: 25%; }
-        .history-item { background: #1a1a1a; padding: 12px; border-radius: 10px; margin-bottom: 10px; border-left: 4px solid #00ff00; }
-        #loader { position: fixed; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+        #init-overlay { position: fixed; top:0; left:0; width:100%; height:100%; background:#000; z-index:2000; display:flex; justify-content:center; align-items:center; }
+        .instruction-toast { position: fixed; top: 70px; width: 80%; left: 10%; background: rgba(255,165,0,0.8); padding: 10px; border-radius: 8px; text-align: center; display: none; z-index: 100; font-size: 14px; }
     </style>
 </head>
 <body>
-    <div id="loader">
-        <button class="btn-main" onclick="startApp()" style="width:200px">Start Camera</button>
-        <p id="load-status" style="margin-top:15px; font-size:12px; color:#666;">Ready</p>
-    </div>
-
+    <div id="init-overlay"><button class="btn-main" style="width:200px" onclick="firstStart()">START SYSTEM</button></div>
+    <div id="toast" class="instruction-toast">Tap the 8 corners of the box</div>
     <video id="input_video" style="display:none;" playsinline muted></video>
     <canvas id="canvas_output"></canvas>
 
-    <div class="top-bar">
-        <button class="btn-sec" style="width:auto;" onclick="toggleHistory()">📜 History</button>
-        <button class="btn-sec" style="width:auto;" onclick="switchCamera()">🔄 Flip</button>
-    </div>
-
     <div class="ui-bottom">
         <div id="dims">Point at Box</div>
-        <div id="vol">Volume: --</div>
         <div class="btn-row">
-            <button class="btn-sec" onclick="calibrate()">📏 Calib</button>
-            <button class="btn-main" id="actionBtn" onclick="handleCapture()">📸 Capture & Save</button>
+            <button class="btn-sec" onclick="toggleManualMode()">🖱️ Manual Select</button>
+            <button class="btn-main" id="actionBtn" onclick="handleFlow()">📸 Capture</button>
         </div>
-    </div>
-
-    <div id="history-panel">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-            <h2>History</h2>
-            <button onclick="clearHistory()" style="background:#ff4444; color:#fff; padding:8px; border-radius:8px;">Clear All</button>
-        </div>
-        <div id="history-list"></div>
-        <button class="btn-sec" style="width:100%; margin-top:20px;" onclick="toggleHistory()">Close</button>
     </div>
 
     <script type="module">
@@ -66,47 +38,40 @@
         const canvas = document.getElementById('canvas_output');
         const ctx = canvas.getContext('2d');
         const dimDiv = document.getElementById('dims');
-        const volDiv = document.getElementById('vol');
         const actionBtn = document.getElementById('actionBtn');
+        const toast = document.getElementById('toast');
 
-        let cameraObj = null;
         let isCaptured = false;
-        let currentFacing = 'environment';
+        let manualMode = false;
+        let manualPoints = [];
         let scaleFactor = 100;
-        let history = JSON.parse(localStorage.getItem('box_history_v12') || '[]');
+        let cameraObj = null;
 
-        const objectron = new Objectron({
-            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/objectron/${file}`
-        });
-
+        const objectron = new Objectron({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/objectron/${file}` });
         objectron.setOptions({ modelName: 'Box', maxNumObjects: 1, staticImageMode: true });
 
         objectron.onResults((results) => {
-            document.getElementById('loader').style.display = "none";
             if (results.detectedObjects.length > 0) {
-                const obj = results.detectedObjects[0];
-                const l = (obj.scale[0] * scaleFactor).toFixed(1);
-                const w = (obj.scale[1] * scaleFactor).toFixed(1);
-                const h = (obj.scale[2] * scaleFactor).toFixed(1);
-                const volume = (l * w * h).toFixed(0);
-
-                dimDiv.innerText = `${l}x${w}x${h} cm`;
-                volDiv.innerText = `Vol: ${volume} cm³`;
-                
-                saveToHistory(dimDiv.innerText, volDiv.innerText, canvas.toDataURL());
+                processResults(results.detectedObjects[0].scale);
             } else {
-                dimDiv.innerText = "AI Failed. Try manually.";
+                dimDiv.innerText = "AI Failed. Switch to Manual Mode.";
+                toast.style.display = "block";
             }
         });
 
-        window.startApp = async () => {
-            document.getElementById('load-status').innerText = "Waking up camera...";
-            startCamera(currentFacing);
-            setTimeout(() => { document.getElementById('loader').style.display = "none"; }, 1500);
+        function processResults(scale) {
+            const l = (scale[0] * scaleFactor).toFixed(1);
+            const w = (scale[1] * scaleFactor).toFixed(1);
+            const h = (scale[2] * scaleFactor).toFixed(1);
+            dimDiv.innerText = `${l} x ${w} x ${h} cm`;
+        }
+
+        window.firstStart = () => {
+            document.getElementById('init-overlay').style.display = 'none';
+            startCamera();
         };
 
-        async function startCamera(mode) {
-            if (cameraObj) await cameraObj.stop();
+        async function startCamera() {
             cameraObj = new Camera(video, {
                 onFrame: async () => {
                     if (!isCaptured) {
@@ -115,65 +80,62 @@
                         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                     }
                 },
-                facingMode: mode, width: 640, height: 480
+                facingMode: 'environment', width: 640, height: 480
             });
-            cameraObj.start();
+            await cameraObj.start();
         }
 
-        window.handleCapture = async () => {
+        window.toggleManualMode = () => {
+            manualMode = !manualMode;
+            manualPoints = [];
+            toast.style.display = manualMode ? "block" : "none";
+            dimDiv.innerText = manualMode ? "Tap Corners (0/8)" : "Point at Box";
+        };
+
+        canvas.addEventListener('mousedown', (e) => {
+            if (!manualMode || !isCaptured) return;
+            const rect = canvas.getBoundingClientRect();
+            const x = (e.clientX - rect.left) / rect.width;
+            const y = (e.clientY - rect.top) / rect.height;
+            
+            manualPoints.push({x, y});
+            drawPoint(e.clientX - rect.left, e.clientY - rect.top);
+            
+            dimDiv.innerText = `Points: ${manualPoints.length}/8`;
+            if (manualPoints.length === 8) calculateManualDims();
+        });
+
+        function drawPoint(x, y) {
+            ctx.fillStyle = "#ff0000";
+            ctx.beginPath(); ctx.arc(x, y, 5, 0, 2 * Math.PI); ctx.fill();
+        }
+
+        function calculateManualDims() {
+            // Simplified logic: calculate distance between first 3 points as L, W, H proxies
+            // In a full build, this uses 3D reconstruction math
+            const dist = (p1, p2) => Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2)) * scaleFactor;
+            const l = dist(manualPoints[0], manualPoints[1]).toFixed(1);
+            const w = dist(manualPoints[1], manualPoints[2]).toFixed(1);
+            const h = dist(manualPoints[2], manualPoints[3]).toFixed(1);
+            
+            dimDiv.innerText = `${l} x ${w} x ${h} cm (Manual)`;
+            manualMode = false;
+            toast.style.display = "none";
+        }
+
+        window.handleFlow = async () => {
             if (!isCaptured) {
                 isCaptured = true;
-                actionBtn.innerText = "♻️ New Scan";
-                actionBtn.style.background = "#333";
-                actionBtn.style.color = "#fff";
-                document.getElementById('loader').style.display = "flex";
-                document.getElementById('load-status').innerText = "AI Computing...";
-                await objectron.send({image: video});
+                actionBtn.innerText = "♻️ Reset";
+                if (!manualMode) await objectron.send({image: video});
                 if (cameraObj) await cameraObj.stop();
             } else {
                 isCaptured = false;
-                actionBtn.innerText = "📸 Capture & Save";
-                actionBtn.style.background = "#00ff00";
-                actionBtn.style.color = "#000";
-                startCamera(currentFacing);
+                manualPoints = [];
+                actionBtn.innerText = "📸 Capture";
+                startCamera();
             }
         };
-
-        window.switchCamera = () => {
-            currentFacing = (currentFacing === 'environment') ? 'user' : 'environment';
-            if(!isCaptured) startCamera(currentFacing);
-        };
-
-        window.toggleHistory = () => {
-            document.getElementById('history-panel').classList.toggle('open');
-            renderHistory();
-        };
-
-        function saveToHistory(d, v, img) {
-            history.unshift({ date: new Date().toLocaleString(), dims: d, vol: v, img: img });
-            localStorage.setItem('box_history_v12', JSON.stringify(history.slice(0, 10)));
-        }
-
-        window.downloadImg = (index) => {
-            const link = document.createElement('a');
-            link.download = `measure.png`;
-            link.href = history[index].img;
-            link.click();
-        };
-
-        function renderHistory() {
-            const list = document.getElementById('history-list');
-            list.innerHTML = history.map((h, i) => `
-                <div class="history-item">
-                    <small>${h.date}</small><br><strong>${h.dims}</strong><br>
-                    <small style="color:#00e5ff">${h.vol}</small><br>
-                    <span onclick="downloadImg(${i})" style="color:#00ff00; font-size:12px; text-decoration:underline;">Download Image</span>
-                </div>
-            `).join('') || "No scans yet.";
-        }
-
-        window.calibrate = () => { let v = prompt("Scale:", scaleFactor); if(v) scaleFactor = parseFloat(v); };
-        window.clearHistory = () => { history = []; localStorage.removeItem('box_history_v12'); renderHistory(); };
     </script>
 </body>
 </html>
