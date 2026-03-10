@@ -2,117 +2,26 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>AI Box Dimensoner - High Performance</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>AI Volumetric Pro</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/objectron"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
     <style>
         body { margin: 0; background: #000; color: #fff; font-family: -apple-system, sans-serif; overflow: hidden; }
         #canvas_output { width: 100vw; height: 100vh; object-fit: cover; }
-        .ui-container { position: fixed; bottom: 20px; width: 100%; display: flex; flex-direction: column; align-items: center; gap: 10px; z-index: 10; }
-        .stats-box { background: rgba(0,0,0,0.85); padding: 15px; border-radius: 15px; border: 1px solid #444; width: 85%; text-align: center; }
-        #status { font-size: 12px; color: #aaa; text-transform: uppercase; letter-spacing: 1px; }
-        #dims { font-size: 24px; font-weight: bold; color: #00ff00; margin-top: 5px; }
-        .btn-row { display: flex; gap: 10px; width: 85%; }
-        button { flex: 1; padding: 16px; border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer; transition: 0.2s; }
-        .btn-cal { background: #333; color: white; border: 1px solid #555; }
-        .btn-cap { background: #00ff00; color: #000; }
-        .captured { background: #ff4444 !important; color: #fff !important; }
-    </style>
-</head>
-<body>
-    <video id="input_video" style="display:none;" playsinline></video>
-    <canvas id="canvas_output"></canvas>
-    
-    <div class="ui-container">
-        <div class="stats-box">
-            <div id="status">Scanning for box...</div>
-            <div id="dims">-- x -- x --</div>
-        </div>
-        <div class="btn-row">
-            <button class="btn-cal" onclick="calibrate()">Calibrate</button>
-            <button class="btn-cap" id="capBtn" onclick="toggleCapture()">Capture</button>
-        </div>
-    </div>
-
-    <script type="module">
-        const videoElement = document.getElementById('input_video');
-        const canvasElement = document.getElementById('canvas_output');
-        const canvasCtx = canvasElement.getContext('2d');
-        const statusText = document.getElementById('status');
-        const dimText = document.getElementById('dims');
-        const capBtn = document.getElementById('capBtn');
-
-        let isLocked = false;
-        let scaleFactor = 100; // Multiplier for real-world sizing
-
-        // 1. Initialize Objectron for Box Detection
-        const objectron = new Objectron({
-            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/objectron/${file}`
-        });
-
-        objectron.setOptions({
-            modelName: 'Box',
-            maxNumObjects: 1,
-            minDetectionConfidence: 0.5,
-            minTrackingConfidence: 0.7 // Higher tracking = less "jitter"
-        });
-
-        objectron.onResults((results) => {
-            // Match canvas size to video stream
-            canvasElement.width = videoElement.videoWidth;
-            canvasElement.height = videoElement.videoHeight;
-            
-            canvasCtx.save();
-            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
-
-            if (results.detectedObjects.length > 0 && !isLocked) {
-                statusText.innerText = "Box Detected ✅";
-                const obj = results.detectedObjects[0];
-                
-                // Draw green 3D wireframe
-                drawConnectors(canvasCtx, obj.keypoints, BOX_CONNECTIONS, {color: '#00FF00', lineWidth: 4});
-                
-                // Estimate dimensions based on model scale
-                const l = (obj.scale[0] * scaleFactor).toFixed(1);
-                const w = (obj.scale[1] * scaleFactor).toFixed(1);
-                const h = (obj.scale[2] * scaleFactor).toFixed(1);
-                dimText.innerText = `${l}cm x ${w}cm x ${h}cm`;
-            } else if (!isLocked) {
-                statusText.innerText = "Scanning... Place box in view";
-            }
-            canvasCtx.restore();
-        });
-
-        // 2. Buttons Functions
-        window.toggleCapture = () => {
-            isLocked = !isLocked;
-            if (isLocked) {
-                capBtn.innerText = "Resume Scan";
-                capBtn.classList.add('captured');
-                statusText.innerText = "Dimensions Locked 🔒";
-            } else {
-                capBtn.innerText = "Capture";
-                capBtn.classList.remove('captured');
-            }
-        };
-
-        window.calibrate = () => {
-            let input = prompt("Enter length of a known object in frame (e.g. 8.5 for credit card):", "85");
-            if(input) scaleFactor = parseFloat(input);
-        };
-
-        // 3. Optimized Camera Setup (Back Camera & Lower Res)
-        const camera = new Camera(videoElement, {
-            onFrame: async () => {
-                await objectron.send({image: videoElement});
-            },
-            facingMode: 'environment', // BACK CAMERA
-            width: 640,  // SPEED BOOST
-            height: 480
-        });
-        camera.start();
-    </script>
-</body>
-</html>
+        
+        .top-bar { position: fixed; top: 10px; width: 100%; display: flex; justify-content: space-between; padding: 0 15px; box-sizing: border-box; z-index: 100; }
+        .ui-bottom { position: fixed; bottom: 0; width: 100%; background: rgba(0,0,0,0.9); padding: 20px 0; border-radius: 20px 20px 0 0; display: flex; flex-direction: column; align-items: center; gap: 10px; z-index: 100; }
+        
+        .data-panel { width: 90%; text-align: center; }
+        #dims { font-size: 24px; font-weight: bold; color: #00ff00; }
+        #volume { font-size: 14px; color: #00e5ff; opacity: 0.8; }
+        
+        .btn-row { display: flex; gap: 8px; width: 90%; }
+        button { flex: 1; padding: 15px; border: none; border-radius: 12px; font-weight: bold; cursor: pointer; }
+        .btn-main { background: #00ff00; color: #000; }
+        .btn-sec { background: #222; color: #fff; border: 1px solid #444; }
+        
+        /* History Slide-out */
+        #history-panel { position: fixed; top: 100%; left: 0; width: 100%; height: 75%; background: #111; z-index: 200; transition: 0.4s ease-in-out; border-radius:
