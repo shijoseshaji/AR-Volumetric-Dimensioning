@@ -2,185 +2,126 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-    <title>Dimension Master v17</title>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/objectron"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <title>E-com Dimensioner v18</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3"></script>
     <style>
         body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; }
-        #canvas_output { width: 100vw; height: 100vh; object-fit: cover; }
-        
-        /* UI & Dashboard */
-        .ui-bottom { position: fixed; bottom: 0; width: 100%; background: rgba(0,0,0,0.9); padding: 25px 0; border-radius: 20px 20px 0 0; display: flex; flex-direction: column; align-items: center; gap: 8px; z-index: 100; }
-        #dims { font-size: 28px; font-weight: bold; color: #00ff00; text-align: center; }
-        #status-msg { font-size: 12px; color: #ffeb3b; height: 15px; margin-bottom: 5px; }
-
-        .btn-row { display: flex; gap: 8px; width: 90%; }
-        button { flex: 1; padding: 16px; border: none; border-radius: 12px; font-weight: bold; cursor: pointer; }
-        .btn-main { background: #00ff00; color: #000; }
-        .btn-sec { background: #222; color: #fff; border: 1px solid #444; }
-
-        .top-bar { position: fixed; top: 15px; width: 100%; display: flex; justify-content: space-between; padding: 0 15px; box-sizing: border-box; z-index: 100; }
-        #history-panel { position: fixed; top: 100%; left: 0; width: 100%; height: 75%; background: #111; z-index: 200; transition: 0.4s; padding: 20px; box-sizing: border-box; overflow-y: auto; border-radius: 20px 20px 0 0; }
-        #history-panel.open { top: 25%; }
-        .history-item { background: #1a1a1a; padding: 12px; border-radius: 10px; margin-bottom: 10px; border-left: 5px solid #00ff00; }
-        
-        #init-overlay { position: fixed; inset: 0; background: #000; z-index: 1000; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+        #video_container { position: relative; width: 100vw; height: 100vh; }
+        video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
+        .dashboard { position: fixed; bottom: 0; width: 100%; background: rgba(0,0,0,0.85); padding: 25px 0; border-radius: 20px 20px 0 0; display: flex; flex-direction: column; align-items: center; z-index: 10; }
+        #result { font-size: 28px; font-weight: bold; color: #00ff00; margin-bottom: 10px; }
+        .instructions { font-size: 14px; color: #ffeb3b; margin-bottom: 15px; text-align: center; padding: 0 20px; }
+        button { background: #00ff00; color: #000; border: none; padding: 18px 40px; border-radius: 12px; font-weight: bold; font-size: 16px; cursor: pointer; }
+        #loader { position: fixed; inset: 0; background: #000; z-index: 100; display: flex; flex-direction: column; justify-content: center; align-items: center; }
     </style>
 </head>
 <body>
-    <div id="init-overlay">
-        <button class="btn-main" style="width:200px" onclick="launchApp()">START CAMERA</button>
+
+    <div id="loader">
+        <h2 id="load-text">Initializing AI...</h2>
+        <button id="start-btn" style="display:none;" onclick="startApp()">Start Measuring</button>
     </div>
 
-    <video id="input_video" style="display:none;" playsinline muted></video>
-    <canvas id="canvas_output"></canvas>
-
-    <div class="top-bar">
-        <button class="btn-sec" style="width:auto;" onclick="toggleHistory()">📜 History</button>
-        <button class="btn-sec" style="width:auto;" onclick="switchCamera()">🔄 Flip</button>
+    <div id="video_container">
+        <video id="webcam" autoplay playsinline muted></video>
+        <canvas id="output_canvas"></canvas>
     </div>
 
-    <div class="ui-bottom">
-        <div id="status-msg"></div>
-        <div id="dims">Ready to Scan</div>
-        <div class="btn-row">
-            <button class="btn-sec" onclick="calibrate()">📏 Calib</button>
-            <button class="btn-main" id="actionBtn" onclick="handleFlow()">📸 CAPTURE</button>
-        </div>
+    <div id="tap-hint" style="position:fixed; top:20px; width:100%; text-align:center; color:#fff; z-index:5;">
+        Place a Credit Card next to the box
     </div>
 
-    <div id="history-panel">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-            <h2>History</h2>
-            <button onclick="clearHistory()" style="background:#ff4444; color:#fff; border:none; padding:8px; border-radius:8px;">Clear</button>
-        </div>
-        <div id="history-list"></div>
-        <button class="btn-sec" style="width:100%; margin-top:20px;" onclick="toggleHistory()">Close</button>
+    <div class="dashboard">
+        <div class="instructions">Point at Box + Credit Card</div>
+        <div id="result">0.0 x 0.0 cm</div>
+        <button onclick="location.reload()">Reset Scan</button>
     </div>
 
     <script type="module">
-        const video = document.getElementById('input_video');
-        const canvas = document.getElementById('canvas_output');
-        const ctx = canvas.getContext('2d');
-        const dimDiv = document.getElementById('dims');
-        const statusMsg = document.getElementById('status-msg');
-        const actionBtn = document.getElementById('actionBtn');
+        import { ObjectDetector, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
 
-        let isCaptured = false, manualPoints = [], currentFacing = 'environment';
-        let scaleFactor = 100, history = JSON.parse(localStorage.getItem('box_history_v17') || '[]');
-        let cameraObj = null, watchdog = null;
+        const video = document.getElementById("webcam");
+        const canvas = document.getElementById("output_canvas");
+        const ctx = canvas.getContext("2d");
+        const resultDiv = document.getElementById("result");
+        const startBtn = document.getElementById("start-btn");
+        const loadText = document.getElementById("load-text");
 
-        const objectron = new Objectron({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/objectron/${file}` });
-        objectron.setOptions({ modelName: 'Box', maxNumObjects: 1, staticImageMode: true });
+        let objectDetector;
+        const CARD_REAL_WIDTH = 8.56; // Standard Credit Card in cm
 
-        objectron.onResults((results) => {
-            clearTimeout(watchdog); // Stop the "Fail" timer if we get results
-            if (results.detectedObjects.length > 0) {
-                const obj = results.detectedObjects[0];
-                const l = (obj.scale[0] * scaleFactor).toFixed(1);
-                const w = (obj.scale[1] * scaleFactor).toFixed(1);
-                const h = (obj.scale[2] * scaleFactor).toFixed(1);
-                updateResult(l, w, h, "AI");
-            } else {
-                triggerManualFallback();
-            }
-        });
-
-        window.launchApp = () => { document.getElementById('init-overlay').style.display = 'none'; startCamera(currentFacing); };
-
-        async function startCamera(mode) {
-            if (cameraObj) await cameraObj.stop();
-            cameraObj = new Camera(video, {
-                onFrame: async () => {
-                    if (!isCaptured) {
-                        canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-                        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                    }
+        // Initialize Detector
+        const init = async () => {
+            const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
+            objectDetector = await ObjectDetector.createFromOptions(vision, {
+                baseOptions: {
+                    modelAssetPath: "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite",
+                    delegate: "GPU"
                 },
-                facingMode: mode, width: 640, height: 480
+                scoreThreshold: 0.3,
+                runningMode: "VIDEO"
             });
-            cameraObj.start();
-        }
-
-        window.handleFlow = async () => {
-            if (!isCaptured) {
-                isCaptured = true;
-                actionBtn.innerText = "♻️ RESET";
-                statusMsg.innerText = "AI Processing...";
-                
-                // Watchdog: If AI doesn't answer in 3 seconds, force manual mode
-                watchdog = setTimeout(() => { triggerManualFallback(); }, 3500);
-                
-                await objectron.send({image: video});
-                if (cameraObj) await cameraObj.stop();
-            } else {
-                resetApp();
-            }
+            loadText.innerText = "System Ready";
+            startBtn.style.display = "block";
         };
 
-        function triggerManualFallback() {
-            statusMsg.innerText = "AI Failed. Tap 8 corners of the box.";
-            dimDiv.innerText = "Point 0/8";
-        }
+        window.startApp = () => {
+            document.getElementById("loader").style.display = "none";
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then((stream) => {
+                video.srcObject = stream;
+                video.addEventListener("loadeddata", predict);
+            });
+        };
 
-        function resetApp() {
-            isCaptured = false; manualPoints = [];
-            actionBtn.innerText = "📸 CAPTURE";
-            statusMsg.innerText = "";
-            dimDiv.innerText = "Ready to Scan";
-            startCamera(currentFacing);
-        }
-
-        canvas.addEventListener('click', (e) => {
-            if (!isCaptured || manualPoints.length >= 8) return;
-            const rect = canvas.getBoundingClientRect();
-            const x = (e.clientX - rect.left) * (canvas.width / rect.width);
-            const y = (e.clientY - rect.top) * (canvas.height / rect.height);
-            manualPoints.push({x, y});
+        async function predict() {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
             
-            // Draw Feedback
-            ctx.fillStyle = "#00ff00"; ctx.beginPath(); ctx.arc(x, y, 6, 0, 2*Math.PI); ctx.fill();
-            if (manualPoints.length > 1) {
-                ctx.strokeStyle = "#00ff00"; ctx.lineWidth = 2;
-                ctx.moveTo(manualPoints[manualPoints.length-2].x, manualPoints[manualPoints.length-2].y);
-                ctx.lineTo(x, y); ctx.stroke();
+            const detections = await objectDetector.detectForVideo(video, performance.now());
+            drawDetections(detections.detections);
+            window.requestAnimationFrame(predict);
+        }
+
+        function drawDetections(detections) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            let cardPixels = null;
+            let boxes = [];
+
+            detections.forEach(det => {
+                const label = det.categories[0].categoryName;
+                const score = det.categories[0].score;
+                const { originX, originY, width, height } = det.boundingBox;
+
+                // MediaPipe general model usually labels cards/small rects as 'cell phone' or 'book'
+                // We look for any small rectangular detection to act as the card
+                if (width < canvas.width * 0.4 && width > canvas.width * 0.1) {
+                    cardPixels = width;
+                    drawBox(originX, originY, width, height, "REF CARD", "#fbff00");
+                } else {
+                    boxes.push({ w: width, h: height, x: originX, y: originY });
+                    drawBox(originX, originY, width, height, "PACKAGE", "#00ff00");
+                }
+            });
+
+            if (cardPixels && boxes.length > 0) {
+                const pxToCm = CARD_REAL_WIDTH / cardPixels;
+                const L = (boxes[0].w * pxToCm).toFixed(1);
+                const W = (boxes[0].h * pxToCm).toFixed(1);
+                resultDiv.innerText = `${L} x ${W} cm`;
             }
-            
-            dimDiv.innerText = `Point ${manualPoints.length}/8...`;
-            if (manualPoints.length === 8) calculateManual();
-        });
-
-        function calculateManual() {
-            const dist = (p1, p2) => Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2)) / canvas.width * scaleFactor;
-            const l = dist(manualPoints[0], manualPoints[1]).toFixed(1);
-            const w = dist(manualPoints[1], manualPoints[2]).toFixed(1);
-            const h = (scaleFactor * 0.2).toFixed(1); // Baseline Manual Height
-            updateResult(l, w, h, "Manual");
         }
 
-        function updateResult(l, w, h, method) {
-            const res = `${l} x ${w} x ${h} cm`;
-            dimDiv.innerText = res;
-            statusMsg.innerText = `Source: ${method}`;
-            history.unshift({ date: new Date().toLocaleTimeString(), res: res, img: canvas.toDataURL() });
-            localStorage.setItem('box_history_v17', JSON.stringify(history.slice(0, 10)));
+        function drawBox(x, y, w, h, label, color) {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 4;
+            ctx.strokeRect(x, y, w, h);
+            ctx.fillStyle = color;
+            ctx.fillText(label, x, y - 10);
         }
 
-        window.toggleHistory = () => { document.getElementById('history-panel').classList.toggle('open'); renderHistory(); };
-        function renderHistory() {
-            const list = document.getElementById('history-list');
-            list.innerHTML = history.map((h, i) => `
-                <div class="history-item">
-                    <small>${h.date}</small><br><strong>${h.res}</strong><br>
-                    <a href="${h.img}" download="dim.png" style="color:#00e5ff; font-size:11px;">Save Image</a>
-                </div>
-            `).join('') || "No scans yet.";
-        }
-
-        window.switchCamera = () => { currentFacing = (currentFacing === 'environment') ? 'user' : 'environment'; startCamera(currentFacing); };
-        window.calibrate = () => { let val = prompt("Scale:", scaleFactor); if(val) scaleFactor = parseFloat(val); };
-        window.clearHistory = () => { history = []; localStorage.removeItem('box_history_v17'); renderHistory(); };
+        init();
     </script>
 </body>
 </html>
