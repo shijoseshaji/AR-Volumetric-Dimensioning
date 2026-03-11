@@ -3,36 +3,29 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-    <title>E-com Master v20</title>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3"></script>
+    <title>Dimension Pro v21</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.17/vision_bundle.js" crossorigin="anonymous"></script>
     <style>
         body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; }
         #video_container { position: relative; width: 100vw; height: 100vh; background: #111; }
         video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
-        
         .top-bar { position: fixed; top: 15px; width: 100%; display: flex; justify-content: space-between; padding: 0 15px; box-sizing: border-box; z-index: 100; }
         .ui-bottom { position: fixed; bottom: 0; width: 100%; background: rgba(0,0,0,0.9); padding: 20px 0; border-radius: 20px 20px 0 0; display: flex; flex-direction: column; align-items: center; z-index: 100; }
-        
         #result-display { font-size: 32px; font-weight: bold; color: #00ff00; margin-bottom: 5px; }
         .unit-toggle { margin-bottom: 15px; background: #222; border-radius: 20px; padding: 4px; display: flex; gap: 5px; border: 1px solid #444; }
-        .unit-btn { padding: 6px 15px; border-radius: 15px; border: none; background: transparent; color: #888; cursor: pointer; font-size: 12px; font-weight: bold; transition: 0.3s; }
+        .unit-btn { padding: 6px 15px; border-radius: 15px; border: none; background: transparent; color: #888; cursor: pointer; font-size: 12px; font-weight: bold; }
         .unit-btn.active { background: #00ff00; color: #000; }
-
-        .btn-row { display: flex; gap: 10px; width: 90%; }
-        button.action-btn { flex: 1; padding: 18px; border: none; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 16px; }
-        .btn-main { background: #00ff00; color: #000; }
-        .btn-sec { background: #333; color: #fff; border: 1px solid #444; padding: 10px 15px; border-radius: 8px; font-weight: bold; }
-
-        #history-panel { position: fixed; top: 100%; left: 0; width: 100%; height: 80%; background: #111; z-index: 500; transition: 0.4s cubic-bezier(0.4, 0, 0.2, 1); padding: 20px; box-sizing: border-box; overflow-y: auto; border-radius: 20px 20px 0 0; }
-        #history-panel.open { top: 20%; }
-        .history-item { background: #1a1a1a; padding: 15px; border-radius: 12px; margin-bottom: 15px; border-left: 5px solid #00ff00; }
-        #loader { position: fixed; inset: 0; background: #000; z-index: 1000; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+        .btn-main { background: #00ff00; color: #000; width: 90%; padding: 18px; border-radius: 12px; font-weight: bold; font-size: 16px; border: none; cursor: pointer; }
+        #loader { position: fixed; inset: 0; background: #000; z-index: 1000; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 20px; }
+        .history-panel { position: fixed; top: 100%; left: 0; width: 100%; height: 80%; background: #111; z-index: 500; transition: 0.4s; padding: 20px; box-sizing: border-box; overflow-y: auto; border-radius: 20px 20px 0 0; }
+        .history-panel.open { top: 20%; }
     </style>
 </head>
 <body>
 
     <div id="loader">
-        <h2 id="status">Loading AI...</h2>
+        <h2 id="status">Waking up AI...</h2>
+        <div id="error-log" style="color: #ff4444; font-size: 12px; margin-top: 10px;"></div>
         <button class="btn-main" id="start-node" style="display:none; width:200px" onclick="startApp()">START SYSTEM</button>
     </div>
 
@@ -42,58 +35,62 @@
     </div>
 
     <div class="top-bar">
-        <button class="btn-sec" onclick="toggleHistory()">📜 History</button>
-        <button class="btn-sec" onclick="switchCamera()">🔄 Flip</button>
+        <button onclick="toggleHistory()" style="background:#333; color:#fff; border:none; padding:10px; border-radius:8px;">📜 History</button>
+        <button onclick="switchCamera()" style="background:#333; color:#fff; border:none; padding:10px; border-radius:8px;">🔄 Flip</button>
     </div>
 
     <div class="ui-bottom">
         <div id="result-display">0.0 x 0.0</div>
-        
         <div class="unit-toggle">
-            <button class="unit-btn active" id="btn-cm" onclick="setUnit('cm')">Metric (cm)</button>
-            <button class="unit-btn" id="btn-in" onclick="setUnit('in')">Imperial (in)</button>
+            <button class="unit-btn active" id="btn-cm" onclick="setUnit('cm')">cm</button>
+            <button class="unit-btn" id="btn-in" onclick="setUnit('in')">in</button>
         </div>
-
-        <div class="btn-row">
-            <button class="btn-main action-btn" id="actionBtn" onclick="handleCapture()">📸 CAPTURE & SAVE</button>
-        </div>
+        <button class="btn-main" id="actionBtn" onclick="handleCapture()">📸 CAPTURE & SAVE</button>
     </div>
 
-    <div id="history-panel">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-            <h2 style="margin:0">Scan History</h2>
-            <button onclick="clearHistory()" style="background:#ff4444; color:#fff; border:none; padding:8px 12px; border-radius:8px; font-size:12px;">Clear All</button>
+    <div id="history-panel" class="history-panel">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h2>History</h2>
+            <button onclick="toggleHistory()" style="background:#444; color:#fff; border:none; padding:8px 15px; border-radius:8px;">Close</button>
         </div>
         <div id="history-list"></div>
-        <button class="btn-sec" style="width:100%; margin-top:20px;" onclick="toggleHistory()">Close</button>
     </div>
 
     <script type="module">
-        import { ObjectDetector, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
+        // Use standard imports from the local scope provided by the bundle
+        const { ObjectDetector, FilesetResolver } = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.17/vision_bundle.mjs");
 
         const video = document.getElementById("webcam");
         const canvas = document.getElementById("output_canvas");
         const ctx = canvas.getContext("2d");
         const resultDisplay = document.getElementById("result-display");
         const actionBtn = document.getElementById("actionBtn");
+        const status = document.getElementById("status");
 
         let objectDetector, isCaptured = false, currentFacing = 'environment';
         let currentUnit = 'cm', rawL = 0, rawW = 0;
-        let history = JSON.parse(localStorage.getItem('ecom_master_v20') || '[]');
-        const CARD_REAL_CM = 8.56;
+        let history = JSON.parse(localStorage.getItem('ecom_v21') || '[]');
 
-        const initAI = async () => {
-            const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
-            objectDetector = await ObjectDetector.createFromOptions(vision, {
-                baseOptions: {
-                    modelAssetPath: "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite",
-                    delegate: "GPU"
-                },
-                scoreThreshold: 0.3, runningMode: "VIDEO"
-            });
-            document.getElementById('status').style.display = 'none';
-            document.getElementById('start-node').style.display = 'block';
-        };
+        // Initialize AI with specific WASM path
+        async function initAI() {
+            try {
+                const vision = await FilesetResolver.forVisionTasks(
+                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.17/wasm"
+                );
+                objectDetector = await ObjectDetector.createFromOptions(vision, {
+                    baseOptions: {
+                        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite",
+                        delegate: "GPU"
+                    },
+                    scoreThreshold: 0.3,
+                    runningMode: "VIDEO"
+                });
+                status.style.display = 'none';
+                document.getElementById('start-node').style.display = 'block';
+            } catch (e) {
+                document.getElementById('error-log').innerText = "Error: " + e.message + ". Try refreshing or checking internet connection.";
+            }
+        }
 
         window.startApp = () => {
             document.getElementById("loader").style.display = "none";
@@ -111,61 +108,67 @@
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
             const detections = await objectDetector.detectForVideo(video, performance.now());
-            processDetections(detections.detections);
-            requestAnimationFrame(predict);
-        }
-
-        function processDetections(dets) {
+            
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(video, 0, 0);
             
             let cardPx = null, box = null;
-            dets.forEach(d => {
+            detections.detections.forEach(d => {
                 const { originX, originY, width, height } = d.boundingBox;
-                // Card detection logic
+                // Card Ref logic
                 if (width > canvas.width * 0.1 && width < canvas.width * 0.45) {
                     cardPx = width;
-                    drawBox(originX, originY, width, height, "CARD REF", "#fbff00");
+                    ctx.strokeStyle = "#fbff00"; ctx.lineWidth = 6;
+                    ctx.strokeRect(originX, originY, width, height);
                 } else if (width > canvas.width * 0.2) {
-                    box = { w: width, h: height, x: originX, y: originY };
-                    drawBox(originX, originY, width, height, "BOX", "#00ff00");
+                    box = { w: width, h: height };
+                    ctx.strokeStyle = "#00ff00"; ctx.lineWidth = 6;
+                    ctx.strokeRect(originX, originY, width, height);
                 }
             });
 
             if (cardPx && box) {
-                const ratio = CARD_REAL_CM / cardPx;
-                rawL = (box.w * ratio);
-                rawW = (box.h * ratio);
-                updateResultText();
+                const ratio = 8.56 / cardPx;
+                rawL = box.w * ratio; rawW = box.h * ratio;
+                updateDisplay();
             }
+            requestAnimationFrame(predict);
         }
 
         window.setUnit = (u) => {
             currentUnit = u;
-            document.getElementById('btn-cm').classList.toggle('active', u === 'cm');
-            document.getElementById('btn-in').classList.toggle('active', u === 'in');
-            updateResultText();
+            document.getElementById('btn-cm').className = u === 'cm' ? 'unit-btn active' : 'unit-btn';
+            document.getElementById('btn-in').className = u === 'in' ? 'unit-btn active' : 'unit-btn';
+            updateDisplay();
         };
 
-        function updateResultText() {
-            if (currentUnit === 'cm') {
-                resultDisplay.innerText = `${rawL.toFixed(1)} x ${rawW.toFixed(1)} cm`;
-            } else {
-                const lIn = (rawL / 2.54).toFixed(1);
-                const wIn = (rawW / 2.54).toFixed(1);
-                resultDisplay.innerText = `${lIn} x ${wIn} in`;
-            }
-        }
-
-        function drawBox(x, y, w, h, label, color) {
-            ctx.strokeStyle = color; ctx.lineWidth = 6;
-            ctx.strokeRect(x, y, w, h);
-            ctx.fillStyle = color; ctx.font = "bold 16px sans-serif";
-            ctx.fillText(label, x + 5, y + 25);
+        function updateDisplay() {
+            const l = currentUnit === 'cm' ? rawL.toFixed(1) : (rawL / 2.54).toFixed(1);
+            const w = currentUnit === 'cm' ? rawW.toFixed(1) : (rawW / 2.54).toFixed(1);
+            resultDisplay.innerText = `${l} x ${w} ${currentUnit}`;
         }
 
         window.handleCapture = () => {
             if (!isCaptured) {
                 isCaptured = true;
                 actionBtn.innerText = "♻️ NEW SCAN";
-                actionBtn.style.background = "#
+                history.unshift({ date: new Date().toLocaleTimeString(), res: resultDisplay.innerText });
+                localStorage.setItem('ecom_v21', JSON.stringify(history.slice(0, 10)));
+            } else {
+                isCaptured = false;
+                actionBtn.innerText = "📸 CAPTURE & SAVE";
+                predict();
+            }
+        };
+
+        window.switchCamera = () => {
+            currentFacing = currentFacing === 'environment' ? 'user' : 'environment';
+            startCamera(currentFacing);
+        };
+
+        window.toggleHistory = () => document.getElementById('history-panel').classList.toggle('open');
+
+        initAI();
+    </script>
+</body>
+</html>
