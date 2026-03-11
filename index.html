@@ -3,24 +3,37 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-    <title>E-com Dimensioner v18</title>
+    <title>E-com Master v20</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3"></script>
     <style>
         body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; }
-        #video_container { position: relative; width: 100vw; height: 100vh; }
+        #video_container { position: relative; width: 100vw; height: 100vh; background: #111; }
         video, canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
-        .dashboard { position: fixed; bottom: 0; width: 100%; background: rgba(0,0,0,0.85); padding: 25px 0; border-radius: 20px 20px 0 0; display: flex; flex-direction: column; align-items: center; z-index: 10; }
-        #result { font-size: 28px; font-weight: bold; color: #00ff00; margin-bottom: 10px; }
-        .instructions { font-size: 14px; color: #ffeb3b; margin-bottom: 15px; text-align: center; padding: 0 20px; }
-        button { background: #00ff00; color: #000; border: none; padding: 18px 40px; border-radius: 12px; font-weight: bold; font-size: 16px; cursor: pointer; }
-        #loader { position: fixed; inset: 0; background: #000; z-index: 100; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+        
+        .top-bar { position: fixed; top: 15px; width: 100%; display: flex; justify-content: space-between; padding: 0 15px; box-sizing: border-box; z-index: 100; }
+        .ui-bottom { position: fixed; bottom: 0; width: 100%; background: rgba(0,0,0,0.9); padding: 20px 0; border-radius: 20px 20px 0 0; display: flex; flex-direction: column; align-items: center; z-index: 100; }
+        
+        #result-display { font-size: 32px; font-weight: bold; color: #00ff00; margin-bottom: 5px; }
+        .unit-toggle { margin-bottom: 15px; background: #222; border-radius: 20px; padding: 4px; display: flex; gap: 5px; border: 1px solid #444; }
+        .unit-btn { padding: 6px 15px; border-radius: 15px; border: none; background: transparent; color: #888; cursor: pointer; font-size: 12px; font-weight: bold; transition: 0.3s; }
+        .unit-btn.active { background: #00ff00; color: #000; }
+
+        .btn-row { display: flex; gap: 10px; width: 90%; }
+        button.action-btn { flex: 1; padding: 18px; border: none; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 16px; }
+        .btn-main { background: #00ff00; color: #000; }
+        .btn-sec { background: #333; color: #fff; border: 1px solid #444; padding: 10px 15px; border-radius: 8px; font-weight: bold; }
+
+        #history-panel { position: fixed; top: 100%; left: 0; width: 100%; height: 80%; background: #111; z-index: 500; transition: 0.4s cubic-bezier(0.4, 0, 0.2, 1); padding: 20px; box-sizing: border-box; overflow-y: auto; border-radius: 20px 20px 0 0; }
+        #history-panel.open { top: 20%; }
+        .history-item { background: #1a1a1a; padding: 15px; border-radius: 12px; margin-bottom: 15px; border-left: 5px solid #00ff00; }
+        #loader { position: fixed; inset: 0; background: #000; z-index: 1000; display: flex; flex-direction: column; justify-content: center; align-items: center; }
     </style>
 </head>
 <body>
 
     <div id="loader">
-        <h2 id="load-text">Initializing AI...</h2>
-        <button id="start-btn" style="display:none;" onclick="startApp()">Start Measuring</button>
+        <h2 id="status">Loading AI...</h2>
+        <button class="btn-main" id="start-node" style="display:none; width:200px" onclick="startApp()">START SYSTEM</button>
     </div>
 
     <div id="video_container">
@@ -28,14 +41,31 @@
         <canvas id="output_canvas"></canvas>
     </div>
 
-    <div id="tap-hint" style="position:fixed; top:20px; width:100%; text-align:center; color:#fff; z-index:5;">
-        Place a Credit Card next to the box
+    <div class="top-bar">
+        <button class="btn-sec" onclick="toggleHistory()">📜 History</button>
+        <button class="btn-sec" onclick="switchCamera()">🔄 Flip</button>
     </div>
 
-    <div class="dashboard">
-        <div class="instructions">Point at Box + Credit Card</div>
-        <div id="result">0.0 x 0.0 cm</div>
-        <button onclick="location.reload()">Reset Scan</button>
+    <div class="ui-bottom">
+        <div id="result-display">0.0 x 0.0</div>
+        
+        <div class="unit-toggle">
+            <button class="unit-btn active" id="btn-cm" onclick="setUnit('cm')">Metric (cm)</button>
+            <button class="unit-btn" id="btn-in" onclick="setUnit('in')">Imperial (in)</button>
+        </div>
+
+        <div class="btn-row">
+            <button class="btn-main action-btn" id="actionBtn" onclick="handleCapture()">📸 CAPTURE & SAVE</button>
+        </div>
+    </div>
+
+    <div id="history-panel">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+            <h2 style="margin:0">Scan History</h2>
+            <button onclick="clearHistory()" style="background:#ff4444; color:#fff; border:none; padding:8px 12px; border-radius:8px; font-size:12px;">Clear All</button>
+        </div>
+        <div id="history-list"></div>
+        <button class="btn-sec" style="width:100%; margin-top:20px;" onclick="toggleHistory()">Close</button>
     </div>
 
     <script type="module">
@@ -44,84 +74,98 @@
         const video = document.getElementById("webcam");
         const canvas = document.getElementById("output_canvas");
         const ctx = canvas.getContext("2d");
-        const resultDiv = document.getElementById("result");
-        const startBtn = document.getElementById("start-btn");
-        const loadText = document.getElementById("load-text");
+        const resultDisplay = document.getElementById("result-display");
+        const actionBtn = document.getElementById("actionBtn");
 
-        let objectDetector;
-        const CARD_REAL_WIDTH = 8.56; // Standard Credit Card in cm
+        let objectDetector, isCaptured = false, currentFacing = 'environment';
+        let currentUnit = 'cm', rawL = 0, rawW = 0;
+        let history = JSON.parse(localStorage.getItem('ecom_master_v20') || '[]');
+        const CARD_REAL_CM = 8.56;
 
-        // Initialize Detector
-        const init = async () => {
+        const initAI = async () => {
             const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
             objectDetector = await ObjectDetector.createFromOptions(vision, {
                 baseOptions: {
                     modelAssetPath: "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite",
                     delegate: "GPU"
                 },
-                scoreThreshold: 0.3,
-                runningMode: "VIDEO"
+                scoreThreshold: 0.3, runningMode: "VIDEO"
             });
-            loadText.innerText = "System Ready";
-            startBtn.style.display = "block";
+            document.getElementById('status').style.display = 'none';
+            document.getElementById('start-node').style.display = 'block';
         };
 
         window.startApp = () => {
             document.getElementById("loader").style.display = "none";
-            navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then((stream) => {
-                video.srcObject = stream;
-                video.addEventListener("loadeddata", predict);
-            });
+            startCamera(currentFacing);
         };
 
-        async function predict() {
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            
-            const detections = await objectDetector.detectForVideo(video, performance.now());
-            drawDetections(detections.detections);
-            window.requestAnimationFrame(predict);
+        async function startCamera(facing) {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing } });
+            video.srcObject = stream;
+            video.onloadeddata = () => predict();
         }
 
-        function drawDetections(detections) {
+        async function predict() {
+            if(isCaptured) return;
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const detections = await objectDetector.detectForVideo(video, performance.now());
+            processDetections(detections.detections);
+            requestAnimationFrame(predict);
+        }
+
+        function processDetections(dets) {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(video, 0, 0);
             
-            let cardPixels = null;
-            let boxes = [];
-
-            detections.forEach(det => {
-                const label = det.categories[0].categoryName;
-                const score = det.categories[0].score;
-                const { originX, originY, width, height } = det.boundingBox;
-
-                // MediaPipe general model usually labels cards/small rects as 'cell phone' or 'book'
-                // We look for any small rectangular detection to act as the card
-                if (width < canvas.width * 0.4 && width > canvas.width * 0.1) {
-                    cardPixels = width;
-                    drawBox(originX, originY, width, height, "REF CARD", "#fbff00");
-                } else {
-                    boxes.push({ w: width, h: height, x: originX, y: originY });
-                    drawBox(originX, originY, width, height, "PACKAGE", "#00ff00");
+            let cardPx = null, box = null;
+            dets.forEach(d => {
+                const { originX, originY, width, height } = d.boundingBox;
+                // Card detection logic
+                if (width > canvas.width * 0.1 && width < canvas.width * 0.45) {
+                    cardPx = width;
+                    drawBox(originX, originY, width, height, "CARD REF", "#fbff00");
+                } else if (width > canvas.width * 0.2) {
+                    box = { w: width, h: height, x: originX, y: originY };
+                    drawBox(originX, originY, width, height, "BOX", "#00ff00");
                 }
             });
 
-            if (cardPixels && boxes.length > 0) {
-                const pxToCm = CARD_REAL_WIDTH / cardPixels;
-                const L = (boxes[0].w * pxToCm).toFixed(1);
-                const W = (boxes[0].h * pxToCm).toFixed(1);
-                resultDiv.innerText = `${L} x ${W} cm`;
+            if (cardPx && box) {
+                const ratio = CARD_REAL_CM / cardPx;
+                rawL = (box.w * ratio);
+                rawW = (box.h * ratio);
+                updateResultText();
+            }
+        }
+
+        window.setUnit = (u) => {
+            currentUnit = u;
+            document.getElementById('btn-cm').classList.toggle('active', u === 'cm');
+            document.getElementById('btn-in').classList.toggle('active', u === 'in');
+            updateResultText();
+        };
+
+        function updateResultText() {
+            if (currentUnit === 'cm') {
+                resultDisplay.innerText = `${rawL.toFixed(1)} x ${rawW.toFixed(1)} cm`;
+            } else {
+                const lIn = (rawL / 2.54).toFixed(1);
+                const wIn = (rawW / 2.54).toFixed(1);
+                resultDisplay.innerText = `${lIn} x ${wIn} in`;
             }
         }
 
         function drawBox(x, y, w, h, label, color) {
-            ctx.strokeStyle = color;
-            ctx.lineWidth = 4;
+            ctx.strokeStyle = color; ctx.lineWidth = 6;
             ctx.strokeRect(x, y, w, h);
-            ctx.fillStyle = color;
-            ctx.fillText(label, x, y - 10);
+            ctx.fillStyle = color; ctx.font = "bold 16px sans-serif";
+            ctx.fillText(label, x + 5, y + 25);
         }
 
-        init();
-    </script>
-</body>
-</html>
+        window.handleCapture = () => {
+            if (!isCaptured) {
+                isCaptured = true;
+                actionBtn.innerText = "♻️ NEW SCAN";
+                actionBtn.style.background = "#
