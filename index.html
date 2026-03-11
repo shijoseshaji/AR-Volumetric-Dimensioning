@@ -3,68 +3,57 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-    <title>Dimension Master v16</title>
+    <title>Dimension Master v17</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/objectron"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
     <style>
-        body { margin: 0; background: #000; color: #fff; font-family: -apple-system, sans-serif; overflow: hidden; }
+        body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; }
         #canvas_output { width: 100vw; height: 100vh; object-fit: cover; }
         
-        /* Dashboard Styling */
-        .ui-bottom { position: fixed; bottom: 0; width: 100%; background: linear-gradient(transparent, rgba(0,0,0,0.95) 20%); padding: 30px 0; display: flex; flex-direction: column; align-items: center; gap: 12px; z-index: 100; }
-        
-        .dim-container { text-align: center; margin-bottom: 10px; }
-        .label { font-size: 12px; color: #aaa; text-transform: uppercase; letter-spacing: 2px; }
-        #dims { font-size: 32px; font-weight: 800; color: #00ff00; text-shadow: 0 0 10px rgba(0,255,0,0.3); }
-        #vol-small { font-size: 14px; color: #444; } /* Volume made small/secondary */
+        /* UI & Dashboard */
+        .ui-bottom { position: fixed; bottom: 0; width: 100%; background: rgba(0,0,0,0.9); padding: 25px 0; border-radius: 20px 20px 0 0; display: flex; flex-direction: column; align-items: center; gap: 8px; z-index: 100; }
+        #dims { font-size: 28px; font-weight: bold; color: #00ff00; text-align: center; }
+        #status-msg { font-size: 12px; color: #ffeb3b; height: 15px; margin-bottom: 5px; }
 
-        .btn-row { display: flex; gap: 10px; width: 90%; max-width: 400px; }
-        button { flex: 1; padding: 18px; border: none; border-radius: 15px; font-weight: bold; font-size: 16px; cursor: pointer; transition: 0.2s; }
+        .btn-row { display: flex; gap: 8px; width: 90%; }
+        button { flex: 1; padding: 16px; border: none; border-radius: 12px; font-weight: bold; cursor: pointer; }
         .btn-main { background: #00ff00; color: #000; }
         .btn-sec { background: #222; color: #fff; border: 1px solid #444; }
 
-        /* Navigation & History */
-        .top-bar { position: fixed; top: 15px; width: 100%; display: flex; justify-content: space-between; padding: 0 20px; box-sizing: border-box; z-index: 100; }
-        #history-panel { position: fixed; top: 100%; left: 0; width: 100%; height: 75%; background: #111; z-index: 200; transition: 0.5s cubic-bezier(0.4, 0, 0.2, 1); padding: 25px; box-sizing: border-box; overflow-y: auto; border-radius: 25px 25px 0 0; }
+        .top-bar { position: fixed; top: 15px; width: 100%; display: flex; justify-content: space-between; padding: 0 15px; box-sizing: border-box; z-index: 100; }
+        #history-panel { position: fixed; top: 100%; left: 0; width: 100%; height: 75%; background: #111; z-index: 200; transition: 0.4s; padding: 20px; box-sizing: border-box; overflow-y: auto; border-radius: 20px 20px 0 0; }
         #history-panel.open { top: 25%; }
-        .history-item { background: #1a1a1a; padding: 15px; border-radius: 15px; margin-bottom: 15px; border-left: 5px solid #00ff00; }
+        .history-item { background: #1a1a1a; padding: 12px; border-radius: 10px; margin-bottom: 10px; border-left: 5px solid #00ff00; }
         
         #init-overlay { position: fixed; inset: 0; background: #000; z-index: 1000; display: flex; flex-direction: column; justify-content: center; align-items: center; }
-        .tap-prompt { position: fixed; top: 100px; width: 100%; text-align: center; color: #fbff00; font-weight: bold; display: none; z-index: 50; }
     </style>
 </head>
 <body>
     <div id="init-overlay">
-        <h1 style="margin-bottom:20px">Box Dimensioner</h1>
-        <button class="btn-main" style="width:220px" onclick="launchApp()">START CAMERA</button>
+        <button class="btn-main" style="width:200px" onclick="launchApp()">START CAMERA</button>
     </div>
 
-    <div id="tap-hint" class="tap-prompt">AI Failed. Tap 8 corners of the box.</div>
-    
     <video id="input_video" style="display:none;" playsinline muted></video>
     <canvas id="canvas_output"></canvas>
 
     <div class="top-bar">
-        <button class="btn-sec" style="width:auto; padding:10px 20px;" onclick="toggleHistory()">📜 History</button>
-        <button class="btn-sec" style="width:auto; padding:10px 20px;" onclick="switchCamera()">🔄 Flip</button>
+        <button class="btn-sec" style="width:auto;" onclick="toggleHistory()">📜 History</button>
+        <button class="btn-sec" style="width:auto;" onclick="switchCamera()">🔄 Flip</button>
     </div>
 
     <div class="ui-bottom">
-        <div class="dim-container">
-            <div class="label">Dimensions (L x W x H)</div>
-            <div id="dims">0.0 x 0.0 x 0.0 cm</div>
-            <div id="vol-small">Vol: --</div>
-        </div>
+        <div id="status-msg"></div>
+        <div id="dims">Ready to Scan</div>
         <div class="btn-row">
-            <button class="btn-sec" onclick="calibrate()">📏 Calibrate</button>
-            <button class="btn-main" id="actionBtn" onclick="handleWorkflow()">📸 CAPTURE</button>
+            <button class="btn-sec" onclick="calibrate()">📏 Calib</button>
+            <button class="btn-main" id="actionBtn" onclick="handleFlow()">📸 CAPTURE</button>
         </div>
     </div>
 
     <div id="history-panel">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-            <h2 style="margin:0">Saved Dimensions</h2>
-            <button onclick="clearHistory()" style="background:#ff4444; color:#fff; border:none; padding:8px 15px; border-radius:10px;">Clear</button>
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h2>History</h2>
+            <button onclick="clearHistory()" style="background:#ff4444; color:#fff; border:none; padding:8px; border-radius:8px;">Clear</button>
         </div>
         <div id="history-list"></div>
         <button class="btn-sec" style="width:100%; margin-top:20px;" onclick="toggleHistory()">Close</button>
@@ -75,26 +64,26 @@
         const canvas = document.getElementById('canvas_output');
         const ctx = canvas.getContext('2d');
         const dimDiv = document.getElementById('dims');
-        const volDiv = document.getElementById('vol-small');
+        const statusMsg = document.getElementById('status-msg');
         const actionBtn = document.getElementById('actionBtn');
 
         let isCaptured = false, manualPoints = [], currentFacing = 'environment';
-        let scaleFactor = 100, history = JSON.parse(localStorage.getItem('box_history_v16') || '[]');
-        let cameraObj = null;
+        let scaleFactor = 100, history = JSON.parse(localStorage.getItem('box_history_v17') || '[]');
+        let cameraObj = null, watchdog = null;
 
         const objectron = new Objectron({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/objectron/${file}` });
         objectron.setOptions({ modelName: 'Box', maxNumObjects: 1, staticImageMode: true });
 
         objectron.onResults((results) => {
+            clearTimeout(watchdog); // Stop the "Fail" timer if we get results
             if (results.detectedObjects.length > 0) {
                 const obj = results.detectedObjects[0];
                 const l = (obj.scale[0] * scaleFactor).toFixed(1);
                 const w = (obj.scale[1] * scaleFactor).toFixed(1);
                 const h = (obj.scale[2] * scaleFactor).toFixed(1);
-                updateDisplay(l, w, h, "AI");
+                updateResult(l, w, h, "AI");
             } else {
-                dimDiv.innerText = "Manual Select Required";
-                document.getElementById('tap-hint').style.display = "block";
+                triggerManualFallback();
             }
         });
 
@@ -114,23 +103,34 @@
             cameraObj.start();
         }
 
-        window.handleWorkflow = async () => {
+        window.handleFlow = async () => {
             if (!isCaptured) {
                 isCaptured = true;
                 actionBtn.innerText = "♻️ RESET";
-                actionBtn.style.background = "#333";
-                actionBtn.style.color = "#fff";
+                statusMsg.innerText = "AI Processing...";
+                
+                // Watchdog: If AI doesn't answer in 3 seconds, force manual mode
+                watchdog = setTimeout(() => { triggerManualFallback(); }, 3500);
+                
                 await objectron.send({image: video});
                 if (cameraObj) await cameraObj.stop();
             } else {
-                isCaptured = false; manualPoints = [];
-                actionBtn.innerText = "📸 CAPTURE";
-                actionBtn.style.background = "#00ff00";
-                actionBtn.style.color = "#000";
-                document.getElementById('tap-hint').style.display = "none";
-                startCamera(currentFacing);
+                resetApp();
             }
         };
+
+        function triggerManualFallback() {
+            statusMsg.innerText = "AI Failed. Tap 8 corners of the box.";
+            dimDiv.innerText = "Point 0/8";
+        }
+
+        function resetApp() {
+            isCaptured = false; manualPoints = [];
+            actionBtn.innerText = "📸 CAPTURE";
+            statusMsg.innerText = "";
+            dimDiv.innerText = "Ready to Scan";
+            startCamera(currentFacing);
+        }
 
         canvas.addEventListener('click', (e) => {
             if (!isCaptured || manualPoints.length >= 8) return;
@@ -139,42 +139,48 @@
             const y = (e.clientY - rect.top) * (canvas.height / rect.height);
             manualPoints.push({x, y});
             
-            ctx.fillStyle = "#00ff00"; ctx.beginPath(); ctx.arc(x, y, 8, 0, 2*Math.PI); ctx.fill();
-            dimDiv.innerText = `Point ${manualPoints.length}/8...`;
-            
-            if (manualPoints.length === 8) {
-                const l = (Math.abs(manualPoints[0].x - manualPoints[1].x) / canvas.width * scaleFactor).toFixed(1);
-                const w = (Math.abs(manualPoints[1].y - manualPoints[2].y) / canvas.height * scaleFactor).toFixed(1);
-                const h = (scaleFactor * 0.25).toFixed(1); // Manual height baseline
-                updateDisplay(l, w, h, "Manual");
+            // Draw Feedback
+            ctx.fillStyle = "#00ff00"; ctx.beginPath(); ctx.arc(x, y, 6, 0, 2*Math.PI); ctx.fill();
+            if (manualPoints.length > 1) {
+                ctx.strokeStyle = "#00ff00"; ctx.lineWidth = 2;
+                ctx.moveTo(manualPoints[manualPoints.length-2].x, manualPoints[manualPoints.length-2].y);
+                ctx.lineTo(x, y); ctx.stroke();
             }
+            
+            dimDiv.innerText = `Point ${manualPoints.length}/8...`;
+            if (manualPoints.length === 8) calculateManual();
         });
 
-        function updateDisplay(l, w, h, method) {
-            const v = (l * w * h).toFixed(0);
-            dimDiv.innerText = `${l} x ${w} x ${h} cm`;
-            volDiv.innerText = `Method: ${method} | Vol: ${v} cm³`;
-            
-            history.unshift({ date: new Date().toLocaleTimeString(), res: dimDiv.innerText, img: canvas.toDataURL() });
-            localStorage.setItem('box_history_v16', JSON.stringify(history.slice(0, 10)));
+        function calculateManual() {
+            const dist = (p1, p2) => Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2)) / canvas.width * scaleFactor;
+            const l = dist(manualPoints[0], manualPoints[1]).toFixed(1);
+            const w = dist(manualPoints[1], manualPoints[2]).toFixed(1);
+            const h = (scaleFactor * 0.2).toFixed(1); // Baseline Manual Height
+            updateResult(l, w, h, "Manual");
+        }
+
+        function updateResult(l, w, h, method) {
+            const res = `${l} x ${w} x ${h} cm`;
+            dimDiv.innerText = res;
+            statusMsg.innerText = `Source: ${method}`;
+            history.unshift({ date: new Date().toLocaleTimeString(), res: res, img: canvas.toDataURL() });
+            localStorage.setItem('box_history_v17', JSON.stringify(history.slice(0, 10)));
         }
 
         window.toggleHistory = () => { document.getElementById('history-panel').classList.toggle('open'); renderHistory(); };
-
         function renderHistory() {
             const list = document.getElementById('history-list');
             list.innerHTML = history.map((h, i) => `
                 <div class="history-item">
-                    <div style="font-size:11px; color:#666">${h.date}</div>
-                    <div style="font-weight:bold; font-size:20px; color:#00ff00">${h.res}</div>
-                    <a href="${h.img}" download="dim.png" style="color:#00e5ff; font-size:12px; text-decoration:none;">💾 Save Image</a>
+                    <small>${h.date}</small><br><strong>${h.res}</strong><br>
+                    <a href="${h.img}" download="dim.png" style="color:#00e5ff; font-size:11px;">Save Image</a>
                 </div>
-            `).join('') || "No scans recorded.";
+            `).join('') || "No scans yet.";
         }
 
         window.switchCamera = () => { currentFacing = (currentFacing === 'environment') ? 'user' : 'environment'; startCamera(currentFacing); };
-        window.calibrate = () => { let val = prompt("Enter reference scale (Default 100):", scaleFactor); if(val) scaleFactor = parseFloat(val); };
-        window.clearHistory = () => { history = []; localStorage.removeItem('box_history_v16'); renderHistory(); };
+        window.calibrate = () => { let val = prompt("Scale:", scaleFactor); if(val) scaleFactor = parseFloat(val); };
+        window.clearHistory = () => { history = []; localStorage.removeItem('box_history_v17'); renderHistory(); };
     </script>
 </body>
 </html>
